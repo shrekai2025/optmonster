@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OptMonster · AI 日志</title>
+    <link rel="stylesheet" href="/ui/theme.css" />
+    <style>
+      .layout-logs {
+        display: grid;
+        grid-template-columns: minmax(300px, 0.9fr) minmax(0, 1.3fr);
+        gap: 20px;
+        align-items: start;
+      }
+
+      .log-card {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 12px 14px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--bg-surface);
+        cursor: pointer;
+        transition: border-color var(--transition), background var(--transition), transform var(--transition);
+      }
+      .log-card:hover {
+        border-color: var(--border-medium);
+        background: var(--bg-elevated);
+        transform: translateY(-1px);
+      }
+      .log-card.active {
+        border-color: rgba(108,140,255,0.45);
+        background: var(--accent-glow);
+      }
+
+      .log-type {
+        font-size: 12.5px;
+        font-weight: 600;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--text);
+      }
+
+      .log-meta {
+        font-size: 11.5px;
+        color: var(--text-muted);
+        margin-top: 3px;
+      }
+
+      .log-preview {
+        font-size: 12px;
+        color: var(--text-secondary);
+        margin-top: 6px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .detail-block {
+        padding: 16px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+
+      .detail-block-title {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: var(--text-muted);
+        margin-bottom: 8px;
+      }
+
+      .filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 12px 14px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        margin-bottom: 16px;
+      }
+      .filter-bar select {
+        width: auto;
+        min-width: 130px;
+        padding: 7px 28px 7px 10px;
+        font-size: 12.5px;
+      }
+
+      @media (max-width: 1100px) {
+        .layout-logs { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="topnav">
+      <span class="topnav-brand">Opt<span>Monster</span></span>
+      <div class="topnav-divider"></div>
+      <a href="/console">账号总览</a>
+      <a href="/console/tweets">推文工作台</a>
+      <a href="/console/replies">回复处理</a>
+      <a href="/console/ai">AI 设置</a>
+      <a href="/console/ai/logs" class="active">AI 日志</a>
+      <div class="topnav-actions">
+        <button id="refresh-btn">刷新</button>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <div class="page-header">
+        <div class="page-header-inner">
+          <div class="page-title-group">
+            <p class="page-eyebrow">AI Logs</p>
+            <h1 class="page-title">AI 日志</h1>
+            <p class="page-subtitle">查看 AI 每次输入了什么、输出了什么、哪里报错了</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="status-bar" class="status-bar">
+        <div class="status-dot"></div>
+        <span id="status-text">正在初始化...</span>
+      </div>
+
+      <!-- Summary metrics -->
+      <div id="summary-grid" class="metrics-row"></div>
+
+      <!-- Filter bar -->
+      <div class="filter-bar" style="margin-top: 16px;">
+        <select id="account-filter"><option value="">全部账号</option></select>
+        <select id="type-filter">
+          <option value="">全部类型</option>
+          <option value="decision">decision</option>
+          <option value="learning">learning</option>
+          <option value="prompt_test">prompt_test</option>
+          <option value="auto_score_batch">auto_score_batch</option>
+          <option value="auto_score_skip">auto_score_skip</option>
+          <option value="fetch_filter">fetch_filter</option>
+        </select>
+      </div>
+
+      <div class="layout-logs">
+        <!-- Left: logs list -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <p class="card-eyebrow">Logs</p>
+              <p class="card-title">最近 AI 日志</p>
+            </div>
+          </div>
+          <div class="card-body" style="padding:12px;">
+            <div id="logs-list" style="display:grid; gap:8px;"></div>
+          </div>
+        </div>
+
+        <!-- Right: detail -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <p class="card-eyebrow">Detail</p>
+              <p class="card-title">输入输出详情</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="log-detail" class="empty-state">
+              从左侧选择一条 AI 日志，这里会展示完整输入、输出和报错信息。
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const state = {
+        logs: [],
+        selectedLogId: null,
+        summary: null,
+      };
+
+      const logsList      = document.getElementById("logs-list");
+      const logDetail     = document.getElementById("log-detail");
+      const statusText    = document.getElementById("status-text");
+      const statusBar     = document.getElementById("status-bar");
+      const summaryGrid   = document.getElementById("summary-grid");
+      const accountFilter = document.getElementById("account-filter");
+      const typeFilter    = document.getElementById("type-filter");
+
+      function setStatus(message, level = "") {
+        statusText.textContent = message;
+        statusBar.className = "status-bar" + (level ? " " + level : "");
+      }
+
+      function escapeHtml(v) {
+        return String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+      }
+
+      function chipClass(v) {
+        if (["success"].includes(v)) return "ok";
+        if (["prompt_test","partial","skipped"].includes(v)) return "warn";
+        if (["failed"].includes(v)) return "bad";
+        return "";
+      }
+
+      function formatDate(v) {
+        if (!v) return "n/a";
+        return new Date(v).toLocaleString();
+      }
+
+      async function fetchJson(url, options = {}) {
+        const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
+        if (!response.ok) {
+          let detail = response.statusText;
+          try { const body = await response.json(); detail = body.detail || JSON.stringify(body); } catch {}
+          throw new Error(detail);
+        }
+        return response.status === 204 ? null : response.json();
+      }
+
+      function renderSummary() {
+        if (!state.summary) { summaryGrid.innerHTML = ""; return; }
+        const s = state.summary;
+        const latestBatch = s.latest_auto_score_batch_at
+          ? `${formatDate(s.latest_auto_score_batch_at)} · 成功 ${s.latest_auto_score_batch_scored ?? 0} / 失败 ${s.latest_auto_score_batch_failed ?? 0}`
+          : `最近 ${s.window_hours}h 还没有自动评分批次`;
+        summaryGrid.innerHTML = `
+          <div class="metric-tile">
+            <div class="metric-label">自动评分成功</div>
+            <div class="metric-value">${escapeHtml(s.auto_scored_tweets)}</div>
+            <div class="metric-sub">最近 ${escapeHtml(s.window_hours)}h</div>
+          </div>
+          <div class="metric-tile">
+            <div class="metric-label">自动评分失败</div>
+            <div class="metric-value" style="color:var(--bad);">${escapeHtml(s.auto_score_failed_tweets)}</div>
+            <div class="metric-sub">最近 ${escapeHtml(s.window_hours)}h</div>
+          </div>
+          <div class="metric-tile">
+            <div class="metric-label">因 AI 关闭跳过</div>
+            <div class="metric-value" style="color:var(--warn);">${escapeHtml(s.auto_score_skipped_ai_disabled)}</div>
+            <div class="metric-sub">最近 ${escapeHtml(s.window_hours)}h</div>
+          </div>
+          <div class="metric-tile">
+            <div class="metric-label">过滤回复</div>
+            <div class="metric-value">${escapeHtml(s.filtered_replies_count)}</div>
+            <div class="metric-sub">最近 ${escapeHtml(s.window_hours)}h</div>
+          </div>
+          <div class="metric-tile">
+            <div class="metric-label">过滤 RT</div>
+            <div class="metric-value">${escapeHtml(s.filtered_retweets_count)}</div>
+            <div class="metric-sub">最近 ${escapeHtml(s.window_hours)}h</div>
+          </div>
+          <div class="metric-tile" style="grid-column: span 1;">
+            <div class="metric-label">最近评分批次</div>
+            <div class="metric-value" style="font-size:0.9rem; line-height:1.3;">${escapeHtml(latestBatch)}</div>
+          </div>
+        `;
+      }
+
+      function renderLogCard(item) {
+        const active = item.id === state.selectedLogId ? "active" : "";
+        return `
+          <button class="log-card ${active}" data-log-id="${item.id}">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+              <div>
+                <div class="log-type">${escapeHtml(item.log_type)}</div>
+                <div class="log-meta">${escapeHtml(item.account_id || "global")} · ${escapeHtml(item.provider || "n/a")} · ${escapeHtml(item.model_id || "n/a")}</div>
+              </div>
+              <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px; flex-shrink:0;">
+                <span class="chip ${chipClass(item.status)}" style="font-size:10.5px; padding:2px 8px;">${escapeHtml(item.status)}</span>
+                <span style="font-size:10.5px; color:var(--text-muted);">${escapeHtml(formatDate(item.created_at))}</span>
+              </div>
+            </div>
+            <p class="log-preview">${escapeHtml(item.request_preview || "n/a")}</p>
+            ${item.error_message ? `<p style="font-size:11.5px; color:var(--bad); margin-top:6px;">⚠ ${escapeHtml(item.error_message)}</p>` : ""}
+          </button>
+        `;
+      }
+
+      function renderLogs() {
+        if (!state.logs.length) {
+          logsList.innerHTML = '<div class="empty-state">还没有 AI 日志。</div>';
+          logDetail.innerHTML = '<div class="empty-state">先在推文工作台里生成 AI 决策，或在 AI 设置页做一次测试。</div>';
+          return;
+        }
+        logsList.innerHTML = state.logs.map(renderLogCard).join("");
+      }
+
+      async function loadDetail(logId) {
+        const item = await fetchJson(`/admin/ai-logs/${logId}`);
+        logDetail.innerHTML = `
+          <div style="display:grid; gap:14px;">
+            <div class="detail-block">
+              <div class="detail-block-title">元信息</div>
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                <div>
+                  <div style="font-size:14px; font-weight:600; font-family:'JetBrains Mono',monospace; color:var(--text);">${escapeHtml(item.log_type)}</div>
+                  <div style="font-size:12px; color:var(--text-muted); margin-top:3px;">${escapeHtml(formatDate(item.created_at))}</div>
+                </div>
+                <span class="chip ${chipClass(item.status)}">${escapeHtml(item.status)}</span>
+              </div>
+              <div class="chip-row">
+                <span class="chip">account: ${escapeHtml(item.account_id || "global")}</span>
+                <span class="chip">provider: ${escapeHtml(item.provider || "n/a")}</span>
+                <span class="chip">model: ${escapeHtml(item.model_id || "n/a")}</span>
+              </div>
+              ${item.error_message ? `
+                <div style="margin-top:12px; padding:10px 12px; background:var(--bad-dim); border:1px solid rgba(248,113,113,0.2); border-radius:var(--radius-sm);">
+                  <span style="font-size:12.5px; color:var(--bad);">⚠ ${escapeHtml(item.error_message)}</span>
+                </div>
+              ` : ""}
+            </div>
+            <div class="detail-block">
+              <div class="detail-block-title">Input (Request Payload)</div>
+              <pre>${escapeHtml(JSON.stringify(item.request_payload || {}, null, 2))}</pre>
+            </div>
+            <div class="detail-block">
+              <div class="detail-block-title">Output (Response Payload)</div>
+              <pre>${escapeHtml(JSON.stringify(item.response_payload || {}, null, 2))}</pre>
+            </div>
+          </div>
+        `;
+      }
+
+      async function loadLogs() {
+        const params = new URLSearchParams();
+        if (accountFilter.value) params.set("account_id", accountFilter.value);
+        if (typeFilter.value)    params.set("log_type", typeFilter.value);
+        params.set("limit", "120");
+        const summaryParams = new URLSearchParams();
+        if (accountFilter.value) summaryParams.set("account_id", accountFilter.value);
+        const [logs, accounts, summary] = await Promise.all([
+          fetchJson(`/admin/ai-logs?${params.toString()}`),
+          fetchJson("/admin/accounts"),
+          fetchJson(`/admin/ai-logs/summary?${summaryParams.toString()}`),
+        ]);
+        const current = accountFilter.value;
+        accountFilter.innerHTML = '<option value="">全部账号</option>' +
+          accounts.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.id)}</option>`).join("");
+        accountFilter.value = current;
+        state.logs = logs;
+        state.summary = summary;
+        if (!state.logs.find(l => l.id === state.selectedLogId)) {
+          state.selectedLogId = state.logs[0]?.id || null;
+        }
+        renderSummary();
+        renderLogs();
+        if (state.selectedLogId) await loadDetail(state.selectedLogId);
+      }
+
+      document.getElementById("refresh-btn").addEventListener("click", async () => {
+        setStatus("正在刷新 AI 日志...");
+        try { await loadLogs(); setStatus("AI 日志已刷新", "ok"); }
+        catch (e) { setStatus(`刷新失败: ${e.message}`, "bad"); }
+      });
+
+      logsList.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-log-id]");
+        if (!button) return;
+        state.selectedLogId = Number(button.dataset.logId);
+        renderLogs();
+        try {
+          await loadDetail(state.selectedLogId);
+          setStatus(`已加载 AI 日志 #${state.selectedLogId}`, "ok");
+        } catch (e) { setStatus(`加载详情失败: ${e.message}`, "bad"); }
+      });
+
+      accountFilter.addEventListener("change", () => loadLogs().catch(e => setStatus(`刷新失败: ${e.message}`, "bad")));
+      typeFilter.addEventListener("change",    () => loadLogs().catch(e => setStatus(`刷新失败: ${e.message}`, "bad")));
+
+      loadLogs()
+        .then(() => setStatus("AI 日志页已就绪", "ok"))
+        .catch(e => setStatus(`初始化失败: ${e.message}`, "bad"));
+    </script>
+  </body>
+</html>

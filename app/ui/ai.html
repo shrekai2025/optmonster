@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OptMonster · AI 设置</title>
+    <link rel="stylesheet" href="/ui/theme.css" />
+    <style>
+      .layout-ai {
+        width: min(1000px, 100%);
+        display: grid;
+        gap: 20px;
+      }
+
+      .settings-section {
+        display: grid;
+        gap: 14px;
+      }
+
+      .settings-block {
+        padding: 16px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+
+      .settings-block-title {
+        font-size: 11.5px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--text-muted);
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .checkbox-field {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .checkbox-field:last-child { border-bottom: none; }
+
+      .checkbox-field input[type="checkbox"] {
+        margin-top: 1px;
+        flex-shrink: 0;
+      }
+
+      .checkbox-field-label {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+        font-family: 'JetBrains Mono', monospace;
+        margin-bottom: 3px;
+      }
+      .checkbox-field-help {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.55;
+      }
+
+      /* Prompt template tab system */
+      .prompt-tabs {
+        display: flex;
+        gap: 2px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 3px;
+        margin-bottom: 14px;
+        width: fit-content;
+      }
+      .prompt-tab {
+        padding: 7px 16px;
+        border-radius: 999px;
+        font-size: 12.5px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all var(--transition);
+        border: none;
+        background: transparent;
+      }
+      .prompt-tab.active {
+        background: var(--bg-overlay);
+        color: var(--text);
+      }
+      .prompt-panel { display: none; }
+      .prompt-panel.active { display: block; }
+
+      /* Variable chips */
+      .var-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .var-chip {
+        padding: 3px 8px;
+        background: var(--accent-dim);
+        color: var(--accent);
+        border: 1px solid rgba(108,140,255,0.2);
+        border-radius: 6px;
+        font-size: 11px;
+        font-family: 'JetBrains Mono', monospace;
+      }
+
+      /* Prompt test output */
+      .test-output-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-top: 14px;
+      }
+
+      .output-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: .07em;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+        font-weight: 600;
+      }
+
+      .env-badge {
+        display: inline-block;
+        padding: 6px 12px;
+        background: var(--bg-overlay);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        font-size: 12px;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--text-secondary);
+        word-break: break-all;
+        margin-top: 10px;
+      }
+
+      .error-text { color: var(--bad); }
+
+      @media (max-width: 760px) {
+        .test-output-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="topnav">
+      <span class="topnav-brand">Opt<span>Monster</span></span>
+      <div class="topnav-divider"></div>
+      <a href="/console">账号总览</a>
+      <a href="/console/tweets">推文工作台</a>
+      <a href="/console/replies">回复处理</a>
+      <a href="/console/ai" class="active">AI 设置</a>
+      <a href="/console/ai/logs">AI 日志</a>
+      <div class="topnav-actions">
+        <button id="refresh-btn" class="secondary">刷新</button>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <div class="page-header">
+        <div class="page-header-inner">
+          <div class="page-title-group">
+            <p class="page-eyebrow">AI Configuration</p>
+            <h1 class="page-title">AI 设置</h1>
+            <p class="page-subtitle">管理 AI 参数、全局抓取策略与 Prompt 模板</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="status-bar" class="status-bar">
+        <div class="status-dot"></div>
+        <span id="status-text">正在初始化...</span>
+      </div>
+
+      <div class="layout-ai">
+        <!-- Section 1: Runtime settings -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <p class="card-eyebrow">Runtime Settings</p>
+              <p class="card-title">全局运行设置</p>
+              <p class="card-subtitle">保存后会回写当前 env 文件</p>
+            </div>
+            <span id="persisted-hint" style="font-size:12px; color:var(--text-muted);"></span>
+          </div>
+          <div class="card-body">
+            <!-- Current env badge -->
+            <div id="current-env-file" class="env-badge">当前读取源: 加载中...</div>
+
+            <!-- Summary chips -->
+            <div id="runtime-summary" class="chip-row" style="margin-top: 14px;"></div>
+
+            <form id="runtime-settings-form">
+              <div class="settings-section" style="margin-top: 18px;">
+
+                <!-- Toggles block -->
+                <div class="settings-block">
+                  <div class="settings-block-title">功能开关</div>
+                  <div class="checkbox-field">
+                    <input id="runtime-ai-enabled" type="checkbox" />
+                    <div class="checkbox-field-content">
+                      <div class="checkbox-field-label">AI_ENABLED</div>
+                      <div class="checkbox-field-help">关闭后不会自动评分、不会生成回复/点赞决策，也不会调用学习写作。</div>
+                    </div>
+                  </div>
+                  <div class="checkbox-field">
+                    <input id="runtime-fetch-latest-first" type="checkbox" />
+                    <div class="checkbox-field-content">
+                      <div class="checkbox-field-label">FETCH_LATEST_FIRST</div>
+                      <div class="checkbox-field-help">开启后每轮都先从最新页抓，不够再向旧页补到上限或时间窗口边界。</div>
+                    </div>
+                  </div>
+                  <div class="checkbox-field">
+                    <input id="runtime-fetch-include-replies" type="checkbox" />
+                    <div class="checkbox-field-content">
+                      <div class="checkbox-field-label">FETCH_INCLUDE_REPLIES</div>
+                      <div class="checkbox-field-help">关闭后会跳过回复类推文。</div>
+                    </div>
+                  </div>
+                  <div class="checkbox-field">
+                    <input id="runtime-fetch-include-retweets" type="checkbox" />
+                    <div class="checkbox-field-content">
+                      <div class="checkbox-field-label">FETCH_INCLUDE_RETWEETS</div>
+                      <div class="checkbox-field-help">关闭后会跳过 RT / 转推类推文。</div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- LLM & fetch params -->
+                <div class="settings-block">
+                  <div class="settings-block-title">抓取 & LLM 参数</div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label for="runtime-fetch-window-hours">FETCH_RECENT_WINDOW_HOURS</label>
+                      <input id="runtime-fetch-window-hours" type="number" min="0" max="720" />
+                      <span style="font-size:11.5px; color:var(--text-muted);">只保留最近多少小时内的推文；填 0 表示不限制。</span>
+                    </div>
+                    <div class="field">
+                      <label for="runtime-llm-provider">LLM_PROVIDER</label>
+                      <select id="runtime-llm-provider">
+                        <option value="mock">mock</option>
+                        <option value="openai_compatible">openai_compatible</option>
+                        <option value="anthropic">anthropic</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="runtime-llm-model">LLM_MODEL_ID</label>
+                      <input id="runtime-llm-model" placeholder="gpt-5-mini / claude-sonnet..." />
+                    </div>
+                    <div class="field full">
+                      <label for="runtime-llm-base-url">LLM_BASE_URL</label>
+                      <input id="runtime-llm-base-url" placeholder="https://your-provider.example/v1" />
+                    </div>
+                    <div class="field full">
+                      <label for="runtime-llm-api-key">LLM_API_KEY</label>
+                      <input id="runtime-llm-api-key" type="password" placeholder="留空则保持现有 key" />
+                      <label class="inline" style="margin-top:4px;">
+                        <input id="runtime-llm-replace-key" type="checkbox" />
+                        替换当前 API key（不勾选则保持现有值）
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card-footer" style="margin-top: 0; padding: 16px 0 0; border: none;">
+                <button type="submit">保存全局设置</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Section 2: Prompt test -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <p class="card-eyebrow">Prompt Test</p>
+              <p class="card-title">AI 功能测试窗口</p>
+              <p class="card-subtitle">直接走当前页面保存的 provider 配置</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <form id="prompt-test-form">
+              <div class="field">
+                <label for="prompt-test-input">测试提示词</label>
+                <textarea id="prompt-test-input" placeholder="输入一段提示词，测试当前 AI 是否能正常返回内容。" style="min-height:120px;"></textarea>
+              </div>
+              <button type="submit" style="margin-top:12px;">发送测试</button>
+            </form>
+            <div class="test-output-grid">
+              <div class="output-block">
+                <div class="output-label">回复内容</div>
+                <pre id="prompt-test-output">还没有发送测试请求。</pre>
+              </div>
+              <div class="output-block">
+                <div class="output-label">错误信息</div>
+                <pre id="prompt-test-error" class="error-text">暂无错误。</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: Prompt templates -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <p class="card-eyebrow">Prompt Templates</p>
+              <p class="card-title">判断标准与学习模板</p>
+              <p class="card-subtitle">保存后立即替换运行中的 decision / learning prompt</p>
+            </div>
+            <span id="prompt-config-file" style="font-size:12px; color:var(--text-muted);"></span>
+          </div>
+          <div class="card-body">
+            <!-- Tabs -->
+            <div class="prompt-tabs">
+              <button class="prompt-tab active" data-panel="decision-system">Decision System</button>
+              <button class="prompt-tab" data-panel="decision-user">Decision User</button>
+              <button class="prompt-tab" data-panel="learning-system">Learning System</button>
+              <button class="prompt-tab" data-panel="learning-user">Learning User</button>
+            </div>
+
+            <form id="prompt-templates-form">
+              <!-- Decision system -->
+              <div class="prompt-panel active" id="panel-decision-system">
+                <div class="var-chips">
+                  <span class="var-chip">{persona_name}</span>
+                  <span class="var-chip">{persona_role}</span>
+                  <span class="var-chip">{persona_tone}</span>
+                  <span class="var-chip">{persona_language}</span>
+                  <span class="var-chip">{reply_style}</span>
+                  <span class="var-chip">{forbidden_topics}</span>
+                  <span class="var-chip">{writing_guide}</span>
+                  <span class="var-chip">{json_contract}</span>
+                </div>
+                <textarea id="decision-system-template" style="min-height:240px;"></textarea>
+              </div>
+              <!-- Decision user -->
+              <div class="prompt-panel" id="panel-decision-user">
+                <div class="var-chips">
+                  <span class="var-chip">{author_handle}</span>
+                  <span class="var-chip">{tweet_text}</span>
+                </div>
+                <textarea id="decision-user-template" style="min-height:120px;"></textarea>
+              </div>
+              <!-- Learning system -->
+              <div class="prompt-panel" id="panel-learning-system">
+                <div class="var-chips">
+                  <span class="var-chip">{persona_name}</span>
+                  <span class="var-chip">{persona_tone}</span>
+                  <span class="var-chip">{reply_style}</span>
+                  <span class="var-chip">{json_contract}</span>
+                </div>
+                <textarea id="learning-system-template" style="min-height:240px;"></textarea>
+              </div>
+              <!-- Learning user -->
+              <div class="prompt-panel" id="panel-learning-user">
+                <div class="var-chips">
+                  <span class="var-chip">{tweet_text}</span>
+                  <span class="var-chip">{ai_draft}</span>
+                  <span class="var-chip">{final_draft}</span>
+                </div>
+                <textarea id="learning-user-template" style="min-height:120px;"></textarea>
+              </div>
+
+              <button type="submit" style="margin-top:14px;">保存判断标准模板</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const statusText    = document.getElementById("status-text");
+      const statusBar     = document.getElementById("status-bar");
+      const runtimeSummary    = document.getElementById("runtime-summary");
+      const persistedHint     = document.getElementById("persisted-hint");
+      const currentEnvFile    = document.getElementById("current-env-file");
+      const runtimeAiEnabled  = document.getElementById("runtime-ai-enabled");
+      const runtimeFetchWindowHours    = document.getElementById("runtime-fetch-window-hours");
+      const runtimeFetchLatestFirst    = document.getElementById("runtime-fetch-latest-first");
+      const runtimeFetchIncludeReplies = document.getElementById("runtime-fetch-include-replies");
+      const runtimeFetchIncludeRetweets = document.getElementById("runtime-fetch-include-retweets");
+      const runtimeProvider   = document.getElementById("runtime-llm-provider");
+      const runtimeBaseUrl    = document.getElementById("runtime-llm-base-url");
+      const runtimeModel      = document.getElementById("runtime-llm-model");
+      const runtimeApiKey     = document.getElementById("runtime-llm-api-key");
+      const runtimeReplaceKey = document.getElementById("runtime-llm-replace-key");
+      const promptTestOutput  = document.getElementById("prompt-test-output");
+      const promptTestError   = document.getElementById("prompt-test-error");
+      const promptConfigFile  = document.getElementById("prompt-config-file");
+      const decisionSystemTemplate  = document.getElementById("decision-system-template");
+      const decisionUserTemplate    = document.getElementById("decision-user-template");
+      const learningSystemTemplate  = document.getElementById("learning-system-template");
+      const learningUserTemplate    = document.getElementById("learning-user-template");
+
+      function setStatus(message, level = "") {
+        statusText.textContent = message;
+        statusBar.className = "status-bar" + (level ? " " + level : "");
+      }
+
+      function escapeHtml(v) {
+        return String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+      }
+
+      async function fetchJson(url, options = {}) {
+        const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
+        if (!response.ok) {
+          let detail = response.statusText;
+          try { const body = await response.json(); detail = body.detail || JSON.stringify(body); } catch {}
+          throw new Error(detail);
+        }
+        return response.status === 204 ? null : response.json();
+      }
+
+      function renderRuntimeSettings(s) {
+        currentEnvFile.textContent = `当前读取源: ${s.current_env_file}`;
+        const chips = [
+          { label: "AI",        value: s.ai_enabled ? "开" : "关",                   ok: s.ai_enabled },
+          { label: "Window",    value: `最近 ${s.fetch_recent_window_hours}h` },
+          { label: "Replies",   value: s.fetch_include_replies ? "抓" : "跳过" },
+          { label: "Retweets",  value: s.fetch_include_retweets ? "抓" : "跳过" },
+          { label: "Provider",  value: s.llm_provider },
+          { label: "Model",     value: s.llm_model_id || "n/a" },
+          { label: "Key",       value: s.llm_api_key_masked || "not set" },
+          { label: "TZ",        value: s.app_timezone },
+        ];
+        runtimeSummary.innerHTML = chips.map(c => `
+          <span class="chip${c.ok === true ? " ok" : c.ok === false ? " bad" : ""}">
+            <span style="color:var(--text-muted); font-size:10px;">${escapeHtml(c.label)}</span>
+            ${escapeHtml(c.value)}
+          </span>
+        `).join("");
+        runtimeAiEnabled.checked               = Boolean(s.ai_enabled);
+        runtimeFetchWindowHours.value           = s.fetch_recent_window_hours;
+        runtimeFetchLatestFirst.checked         = Boolean(s.fetch_latest_first);
+        runtimeFetchIncludeReplies.checked      = Boolean(s.fetch_include_replies);
+        runtimeFetchIncludeRetweets.checked     = Boolean(s.fetch_include_retweets);
+        runtimeProvider.value                   = s.llm_provider;
+        runtimeBaseUrl.value                    = s.llm_base_url || "";
+        runtimeModel.value                      = s.llm_model_id || "";
+        runtimeApiKey.value                     = "";
+        runtimeReplaceKey.checked               = false;
+      }
+
+      async function loadRuntimeSettings() {
+        const s = await fetchJson("/admin/runtime-settings");
+        renderRuntimeSettings(s);
+      }
+
+      function renderPromptTemplates(payload) {
+        promptConfigFile.textContent = `模板文件: ${payload.config_file}`;
+        decisionSystemTemplate.value  = payload.decision_system_template || "";
+        decisionUserTemplate.value    = payload.decision_user_template || "";
+        learningSystemTemplate.value  = payload.learning_system_template || "";
+        learningUserTemplate.value    = payload.learning_user_template || "";
+      }
+
+      async function loadPromptTemplates() {
+        const payload = await fetchJson("/admin/runtime-prompts");
+        renderPromptTemplates(payload);
+      }
+
+      // Prompt tab switching
+      document.querySelectorAll(".prompt-tab").forEach(tab => {
+        tab.addEventListener("click", () => {
+          document.querySelectorAll(".prompt-tab").forEach(t => t.classList.remove("active"));
+          document.querySelectorAll(".prompt-panel").forEach(p => p.classList.remove("active"));
+          tab.classList.add("active");
+          document.getElementById("panel-" + tab.dataset.panel)?.classList.add("active");
+        });
+      });
+
+      document.getElementById("refresh-btn").addEventListener("click", async () => {
+        setStatus("正在刷新 AI 设置...");
+        await initializePage({ refresh: true });
+      });
+
+      document.getElementById("runtime-settings-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setStatus("正在保存全局设置...");
+        try {
+          const r = await fetchJson("/admin/runtime-settings", {
+            method: "PUT",
+            body: JSON.stringify({
+              ai_enabled: runtimeAiEnabled.checked,
+              fetch_recent_window_hours: Number(runtimeFetchWindowHours.value || 0),
+              fetch_latest_first: runtimeFetchLatestFirst.checked,
+              fetch_include_replies: runtimeFetchIncludeReplies.checked,
+              fetch_include_retweets: runtimeFetchIncludeRetweets.checked,
+              llm_provider: runtimeProvider.value,
+              llm_base_url: runtimeBaseUrl.value.trim() || null,
+              llm_model_id: runtimeModel.value.trim() || null,
+              llm_api_key: runtimeApiKey.value.trim() || null,
+              replace_api_key: runtimeReplaceKey.checked,
+            }),
+          });
+          renderRuntimeSettings(r.runtime_settings);
+          persistedHint.textContent = `已写入 ${r.persisted_env_file}`;
+          const msg = runtimeAiEnabled.checked
+            ? `全局设置已保存；AI 评分已开启，本次补评分 ${r.auto_scored_tweets || 0} 条。`
+            : "全局设置已保存；AI 评分已关闭。";
+          setStatus(msg + " 若 worker 也要立即生效，建议重启 api/worker", "ok");
+        } catch (e) { setStatus(`保存失败: ${e.message}`, "bad"); }
+      });
+
+      document.getElementById("prompt-templates-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setStatus("正在保存 AI 判断标准模板...");
+        try {
+          const r = await fetchJson("/admin/runtime-prompts", {
+            method: "PUT",
+            body: JSON.stringify({
+              decision_system_template: decisionSystemTemplate.value.trim(),
+              decision_user_template:   decisionUserTemplate.value.trim(),
+              learning_system_template: learningSystemTemplate.value.trim(),
+              learning_user_template:   learningUserTemplate.value.trim(),
+            }),
+          });
+          renderPromptTemplates(r.prompts);
+          setStatus("AI 判断标准模板已保存并立即生效", "ok");
+        } catch (e) { setStatus(`保存模板失败: ${e.message}`, "bad"); }
+      });
+
+      document.getElementById("prompt-test-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const prompt = document.getElementById("prompt-test-input").value.trim();
+        if (!prompt) { setStatus("请输入测试提示词", "warn"); return; }
+        promptTestOutput.textContent = "请求中...";
+        promptTestError.textContent  = "暂无错误。";
+        setStatus("正在向当前 AI provider 发送测试请求...");
+        try {
+          const r = await fetchJson("/admin/runtime-settings/test", {
+            method: "POST",
+            body: JSON.stringify({ prompt }),
+          });
+          promptTestOutput.textContent = r.content || "(empty)";
+          promptTestError.textContent  = "暂无错误。";
+          setStatus(`测试成功：${r.provider} / ${r.model_id || "n/a"}`, "ok");
+        } catch (e) {
+          promptTestOutput.textContent = "请求失败，没有拿到回复内容。";
+          promptTestError.textContent  = e.message;
+          setStatus(`测试失败: ${e.message}`, "bad");
+        }
+      });
+
+      async function initializePage({ refresh = false } = {}) {
+        const messages = [];
+        try {
+          await loadRuntimeSettings();
+          messages.push(refresh ? "运行设置已刷新" : "运行设置已加载");
+        } catch (e) { messages.push(`运行设置加载失败: ${e.message}`); }
+        try {
+          await loadPromptTemplates();
+          messages.push(refresh ? "模板已刷新" : "模板已加载");
+        } catch (e) { messages.push(`模板加载失败: ${e.message}`); }
+        setStatus(messages.join("；"), "ok");
+      }
+
+      initializePage().catch(e => setStatus(`初始化失败: ${e.message}`, "bad"));
+    </script>
+  </body>
+</html>

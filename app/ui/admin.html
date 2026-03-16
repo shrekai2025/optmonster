@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OptMonster · 账号总览</title>
+    <link rel="stylesheet" href="/ui/theme.css" />
+    <style>
+      /* ── Page-specific layout ── */
+      .layout-accounts {
+        display: grid;
+        grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
+        gap: 20px;
+        align-items: start;
+      }
+
+      /* Global toggles panel */
+      .global-toggles {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 24px;
+        align-items: center;
+        padding: 14px 20px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        margin-bottom: 20px;
+      }
+      .global-toggles .toggle-label {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        margin-right: 4px;
+      }
+      .global-toggles .save-row {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      /* Account card */
+      .account-card {
+        background: var(--bg-surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 18px 20px;
+        transition: border-color var(--transition), box-shadow var(--transition);
+      }
+      .account-card:hover {
+        border-color: var(--border-medium);
+        box-shadow: var(--shadow-sm);
+      }
+
+      .account-card-head {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: flex-start;
+        justify-content: space-between;
+      }
+
+      .account-name {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text);
+        letter-spacing: -0.02em;
+      }
+
+      .account-meta {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+
+      .account-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+
+      .account-actions a.chip {
+        cursor: pointer;
+        text-decoration: none;
+      }
+
+      .account-actions button {
+        padding: 6px 12px;
+        font-size: 12px;
+      }
+
+      /* Operation log row */
+      .op-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .op-row:last-child { border-bottom: none; }
+      .op-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--bg-overlay);
+        flex-shrink: 0;
+        margin-top: 5px;
+      }
+      .op-dot.ok { background: var(--ok); }
+      .op-dot.warn { background: var(--warn); }
+      .op-dot.bad { background: var(--bad); }
+      .op-content { flex: 1; min-width: 0; }
+      .op-title {
+        font-size: 13px;
+        font-weight: 500;
+        color: var(--text);
+      }
+      .op-detail {
+        font-size: 11.5px;
+        color: var(--text-secondary);
+        margin-top: 2px;
+      }
+      .op-time {
+        font-size: 11px;
+        color: var(--text-muted);
+        white-space: nowrap;
+        flex-shrink: 0;
+        padding-top: 2px;
+      }
+
+      /* Import section */
+      .import-preview {
+        margin-top: 12px;
+        padding: 12px 14px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        font-size: 12.5px;
+        color: var(--text-secondary);
+        min-height: 48px;
+      }
+
+      /* Runtime info ribbon */
+      .runtime-ribbon {
+        font-size: 11.5px;
+        color: var(--text-muted);
+        line-height: 1.7;
+      }
+      .runtime-ribbon a { font-size: 11.5px; }
+
+      @media (max-width: 1100px) {
+        .layout-accounts { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Top Nav -->
+    <nav class="topnav">
+      <span class="topnav-brand">Opt<span>Monster</span></span>
+      <div class="topnav-divider"></div>
+      <a href="/console" class="active">账号总览</a>
+      <a href="/console/tweets">推文工作台</a>
+      <a href="/console/replies">回复处理</a>
+      <a href="/console/ai">AI 设置</a>
+      <a href="/console/ai/logs">AI 日志</a>
+      <div class="topnav-actions">
+        <button id="reload-btn" class="secondary">重载配置</button>
+        <button id="refresh-btn">刷新</button>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <!-- Page header -->
+      <div class="page-header">
+        <div class="page-header-inner">
+          <div class="page-title-group">
+            <p class="page-eyebrow">OptMonster Console</p>
+            <h1 class="page-title">账号总览</h1>
+            <p class="page-subtitle">账号状态、预算血条与配置管理</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status bar -->
+      <div id="status-bar" class="status-bar">
+        <div class="status-dot"></div>
+        <span id="status-text">正在初始化...</span>
+      </div>
+
+      <!-- Metrics row -->
+      <div id="summary-grid" class="metrics-row"></div>
+
+      <!-- Global toggles -->
+      <form id="runtime-quick-form" class="global-toggles">
+        <span class="toggle-label">全局开关</span>
+        <label class="inline"><input id="quick-ai-enabled" type="checkbox" /> AI 自动评分</label>
+        <label class="inline"><input id="quick-fetch-replies" type="checkbox" /> 抓回复</label>
+        <label class="inline"><input id="quick-fetch-retweets" type="checkbox" /> 抓 RT</label>
+        <div class="save-row">
+          <span id="runtime-settings" class="runtime-ribbon"></span>
+          <button type="submit" class="secondary">保存开关</button>
+        </div>
+      </form>
+
+      <!-- Main layout -->
+      <div class="layout-accounts">
+        <!-- Left: accounts list -->
+        <div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title-group">
+                <p class="card-eyebrow">Accounts</p>
+                <p class="card-title">账号列表</p>
+              </div>
+            </div>
+            <div class="card-body" style="padding: 12px 16px;">
+              <div id="accounts-list" style="display:grid; gap:12px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: sidebar panels -->
+        <div style="display:grid; gap:20px;">
+          <!-- Cookie import -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title-group">
+                <p class="card-eyebrow">Cookie Import</p>
+                <p class="card-title">导入新账号</p>
+                <p class="card-subtitle">自动识别 Netscape / JSON cookie 文件</p>
+              </div>
+            </div>
+            <div class="card-body">
+              <form id="cookie-import-form">
+                <div class="form-grid">
+                  <div class="field full">
+                    <label for="import-source">Cookie 文件</label>
+                    <select id="import-source">
+                      <option value="">选择根目录里的 cookie 文件</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="import-id">账号 id</label>
+                    <input id="import-id" placeholder="自动从文件名生成" />
+                  </div>
+                  <div class="field">
+                    <label for="import-handle">twitter_handle</label>
+                    <input id="import-handle" placeholder="@auto_from_filename" />
+                  </div>
+                  <div class="field">
+                    <label for="import-mode">execution_mode</label>
+                    <select id="import-mode">
+                      <option value="read_only">read_only</option>
+                      <option value="dry_run">dry_run</option>
+                      <option value="live">live</option>
+                    </select>
+                  </div>
+                  <div class="field" style="align-content: end;">
+                    <label class="inline"><input id="import-enabled" type="checkbox" checked /> enabled</label>
+                  </div>
+                  <div class="field full">
+                    <label for="import-extra-yaml">额外 YAML 字段</label>
+                    <textarea id="import-extra-yaml" style="min-height:70px;" placeholder="例如:
+proxy:
+  url: http://127.0.0.1:8080
+targets:
+  search_keywords:
+    - query: agentic ai
+      count: 12"></textarea>
+                  </div>
+                </div>
+                <div id="cookie-import-preview" class="import-preview">选择 cookie 文件后，这里会显示检测结果。</div>
+                <div style="display:flex; gap:8px; margin-top:14px;">
+                  <button type="submit">导入成新账号</button>
+                  <button id="cookie-import-refresh" type="button" class="ghost">刷新候选文件</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Recent operations -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title-group">
+                <p class="card-eyebrow">Operations</p>
+                <p class="card-title">最近操作日志</p>
+              </div>
+            </div>
+            <div class="card-body" style="padding: 0 20px;">
+              <div id="operations-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const state = {
+        dashboard: null,
+        accounts: [],
+        cookieCandidates: [],
+        countdownTimer: null,
+      };
+
+      const accountsList    = document.getElementById("accounts-list");
+      const operationsList  = document.getElementById("operations-list");
+      const statusText      = document.getElementById("status-text");
+      const statusBar       = document.getElementById("status-bar");
+      const summaryGrid     = document.getElementById("summary-grid");
+      const runtimeSettingsEl = document.getElementById("runtime-settings");
+      const importSource    = document.getElementById("import-source");
+      const importId        = document.getElementById("import-id");
+      const importHandle    = document.getElementById("import-handle");
+      const importMode      = document.getElementById("import-mode");
+      const importEnabled   = document.getElementById("import-enabled");
+      const importExtraYaml = document.getElementById("import-extra-yaml");
+      const cookieImportPreview = document.getElementById("cookie-import-preview");
+      const quickAiEnabled      = document.getElementById("quick-ai-enabled");
+      const quickFetchReplies   = document.getElementById("quick-fetch-replies");
+      const quickFetchRetweets  = document.getElementById("quick-fetch-retweets");
+
+      function escapeHtml(v) {
+        return String(v ?? "")
+          .replaceAll("&","&amp;").replaceAll("<","&lt;")
+          .replaceAll(">","&gt;").replaceAll('"',"&quot;");
+      }
+
+      function chipClass(v) {
+        if (["enabled","healthy","valid","success","applied"].includes(v)) return "ok";
+        if (["paused","warn","pending_approval","unknown","manual"].includes(v)) return "warn";
+        if (["expired","unhealthy","failed","admin_disabled","auth_expired","proxy_failed"].includes(v)) return "bad";
+        return "";
+      }
+
+      function opDotClass(status) {
+        if (["success","applied"].includes(status)) return "ok";
+        if (["pending_approval","manual"].includes(status)) return "warn";
+        if (["failed","admin_disabled"].includes(status)) return "bad";
+        return "";
+      }
+
+      function formatDate(v) {
+        if (!v) return "n/a";
+        return new Date(v).toLocaleString();
+      }
+
+      function formatDuration(seconds) {
+        const rem = Math.max(0, Number(seconds || 0));
+        const h = Math.floor(rem / 3600);
+        const m = Math.floor((rem % 3600) / 60);
+        const s = rem % 60;
+        const parts = [];
+        if (h) parts.push(`${h}h`);
+        if (m || h) parts.push(`${m}m`);
+        parts.push(`${s}s`);
+        return parts.join(" ");
+      }
+
+      function parseLinePairs(text, keyName) {
+        return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
+          const [k, c] = l.split(",");
+          return { [keyName]: k.trim(), count: c ? Number(c.trim()) : 20 };
+        });
+      }
+
+      function setStatus(message, level = "") {
+        statusText.textContent = message;
+        statusBar.className = "status-bar" + (level ? " " + level : "");
+      }
+
+      function renderSummary(summary) {
+        const items = [
+          ["账号总数",  summary.total_accounts],
+          ["已启用",    summary.enabled_accounts],
+          ["可用",      summary.usable_accounts],
+          ["暂停中",    summary.paused_accounts],
+          ["推文总数",  summary.total_tweets],
+          ["最新抓取",  summary.latest_fetch_at ? formatDate(summary.latest_fetch_at) : "n/a"],
+        ];
+        summaryGrid.innerHTML = items.map(([label, value]) => `
+          <div class="metric-tile">
+            <div class="metric-label">${escapeHtml(label)}</div>
+            <div class="metric-value">${escapeHtml(value)}</div>
+          </div>
+        `).join("");
+      }
+
+      function renderRuntimeSettings(s) {
+        runtimeSettingsEl.innerHTML = `
+          AI ${s.ai_enabled ? "开" : "关"} &nbsp;·&nbsp;
+          最近 ${escapeHtml(s.fetch_recent_window_hours)}h &nbsp;·&nbsp;
+          ${escapeHtml(s.llm_provider)} / ${escapeHtml(s.llm_model_id || "n/a")} &nbsp;·&nbsp;
+          TZ ${escapeHtml(s.app_timezone)} &nbsp;·&nbsp;
+          <a href="/console/ai">AI 设置</a> &nbsp;·&nbsp;
+          <a href="/console/ai/logs">AI 日志</a>
+        `;
+        quickAiEnabled.checked      = Boolean(s.ai_enabled);
+        quickFetchReplies.checked   = Boolean(s.fetch_include_replies);
+        quickFetchRetweets.checked  = Boolean(s.fetch_include_retweets);
+      }
+
+      function renderCookieCandidates(candidates) {
+        importSource.innerHTML = '<option value="">选择根目录里的 cookie 文件</option>' +
+          candidates.map(c => `
+            <option value="${escapeHtml(c.source_file)}">
+              ${escapeHtml(c.source_file)} · ${escapeHtml(c.format_name)} · ${c.twitter_cookie_count} cookies
+            </option>
+          `).join("");
+      }
+
+      function renderCookiePreview(candidate) {
+        if (!candidate) {
+          cookieImportPreview.innerHTML = "选择 cookie 文件后，这里会显示检测到的 X/Twitter cookie 信息。";
+          cookieImportPreview.style.borderColor = "";
+          return;
+        }
+        const hasIssues = candidate.warnings.length > 0;
+        cookieImportPreview.style.borderColor = hasIssues ? "rgba(248,113,113,0.3)" : "rgba(52,211,153,0.3)";
+        cookieImportPreview.innerHTML = `
+          <div class="chip-row" style="margin-top:0;">
+            <span class="chip">格式: ${escapeHtml(candidate.format_name)}</span>
+            <span class="chip">Cookies: ${escapeHtml(candidate.twitter_cookie_count)}</span>
+            <span class="chip ${candidate.has_auth_token ? "ok" : "bad"}">auth_token: ${candidate.has_auth_token ? "✓" : "✗"}</span>
+            <span class="chip ${candidate.has_ct0 ? "ok" : "warn"}">ct0: ${candidate.has_ct0 ? "✓" : "✗"}</span>
+            ${candidate.warnings.length ? `<span class="chip bad">⚠ ${escapeHtml(candidate.warnings.join(", "))}</span>` : '<span class="chip ok">无警告</span>'}
+          </div>
+          <p style="font-size:11.5px; color:var(--text-muted); margin-top:8px;">
+            建议 id: ${escapeHtml(candidate.suggested_account_id)} · handle: ${escapeHtml(candidate.suggested_twitter_handle)} · 域名: ${escapeHtml((candidate.detected_domains || []).join(", ") || "n/a")}
+          </p>
+        `;
+      }
+
+      function renderBudgetRow(budget) {
+        const pct = Math.max(0, Math.min(100, Math.round((budget.ratio || 0) * 100)));
+        const fillClass = pct <= 15 ? "low" : "";
+        return `
+          <div class="budget-row">
+            <span class="budget-label">${escapeHtml(budget.action_type)}</span>
+            <div class="budget-track">
+              <div class="budget-fill ${fillClass} ${pct === 0 ? "empty" : ""}" style="width:${pct}%"></div>
+            </div>
+            <span class="budget-num">${budget.remaining}/${budget.max}</span>
+          </div>
+        `;
+      }
+
+      function renderFollowerSparkline(history) {
+        if (!history || !history.length) {
+          return '<p style="font-size:11.5px; color:var(--text-muted); margin-top:8px;">暂无粉丝历史</p>';
+        }
+        if (history.length === 1) {
+          return `<p style="font-size:11.5px; color:var(--text-muted); margin-top:8px;">
+            1个采样: ${escapeHtml(history[0].snapshot_date)} · ${escapeHtml(history[0].follower_count)}
+          </p>`;
+        }
+        const W = 300, H = 52, P = 5;
+        const counts = history.map(h => h.follower_count);
+        const min = Math.min(...counts), max = Math.max(...counts);
+        const span = Math.max(max - min, 1);
+        const step = (W - P * 2) / Math.max(history.length - 1, 1);
+        const points = history.map((h, i) => {
+          const x = P + step * i;
+          const y = H - P - ((h.follower_count - min) / span) * (H - P * 2);
+          return `${x.toFixed(1)},${y.toFixed(1)}`;
+        }).join(" ");
+        return `
+          <svg class="sparkline-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="sg" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0%" stop-color="#6c8cff"/>
+                <stop offset="100%" stop-color="#34d399"/>
+              </linearGradient>
+            </defs>
+            <polyline fill="none" stroke="url(#sg)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" points="${points}"></polyline>
+          </svg>
+          <p style="font-size:11px; color:var(--text-muted);">${escapeHtml(history[0].snapshot_date)} → ${escapeHtml(history[history.length-1].snapshot_date)}</p>
+        `;
+      }
+
+      function accountCard(account) {
+        const disabledRuntime = account.lifecycle_status !== "enabled";
+        const followerCount = account.follower_count == null ? "n/a" : account.follower_count;
+        const followerDelta = account.follower_delta == null ? "暂无对比" :
+          `${account.follower_delta >= 0 ? "+" : ""}${account.follower_delta}`;
+        const fetchSchedule = account.fetch_schedule || {};
+        const quietHours = fetchSchedule.quiet_hours
+          ? `${fetchSchedule.quiet_hours[0]}-${fetchSchedule.quiet_hours[1]}`
+          : "off";
+        const barHtml = account.budgets.map(renderBudgetRow).join("");
+        return `
+          <div class="account-card">
+            <div class="account-card-head">
+              <div>
+                <div class="account-name">${escapeHtml(account.twitter_handle)}</div>
+                <div class="account-meta">${escapeHtml(account.id)} · ${escapeHtml(account.persona_name || "")}</div>
+              </div>
+              <div class="account-actions">
+                <a class="chip accent" href="/console/accounts/${encodeURIComponent(account.id)}">详情 →</a>
+                <button class="ghost" style="padding:5px 10px; font-size:11.5px;" data-validate-account="${escapeHtml(account.id)}">校验</button>
+                <button class="secondary" style="padding:5px 10px; font-size:11.5px;" data-fetch-account="${escapeHtml(account.id)}" ${disabledRuntime ? "disabled" : ""}>抓取</button>
+                <button class="${account.lifecycle_status === "enabled" ? "ghost" : "secondary"}" style="padding:5px 10px; font-size:11.5px;"
+                  data-toggle-account="${escapeHtml(account.id)}"
+                  data-next-state="${account.lifecycle_status === "enabled" ? "disable" : "enable"}">
+                  ${account.lifecycle_status === "enabled" ? "停用" : "启用"}
+                </button>
+              </div>
+            </div>
+
+            <!-- Status chips -->
+            <div class="chip-row">
+              <span class="chip ${chipClass(account.lifecycle_status)}">${escapeHtml(account.lifecycle_status)}</span>
+              <span class="chip">mode: ${escapeHtml(account.execution_mode)}</span>
+              <span class="chip ${chipClass(account.cookie_freshness)}">cookie: ${escapeHtml(account.cookie_freshness)}</span>
+              <span class="chip ${chipClass(account.proxy_health)}">proxy: ${escapeHtml(account.proxy_health)}</span>
+              ${account.pause_reason && account.pause_reason !== "none" ? `<span class="chip ${chipClass(account.pause_reason)}">pause: ${escapeHtml(account.pause_reason)}</span>` : ""}
+            </div>
+
+            <!-- Stats -->
+            <div class="stat-grid">
+              <div class="stat-pill">
+                <div class="label">推文数</div>
+                <div class="value">${escapeHtml(account.tweet_count)}</div>
+              </div>
+              <div class="stat-pill">
+                <div class="label">粉丝数</div>
+                <div class="value">${escapeHtml(followerCount)}</div>
+              </div>
+              <div class="stat-pill">
+                <div class="label">粉丝变化</div>
+                <div class="value">${escapeHtml(followerDelta)}</div>
+              </div>
+              <div class="stat-pill">
+                <div class="label">连续失败</div>
+                <div class="value">${escapeHtml(account.failure_streak)}</div>
+              </div>
+              <div class="stat-pill">
+                <div class="label">额度重置</div>
+                <div class="value" data-daily-reset="${account.daily_reset_in_seconds}">${formatDuration(account.daily_reset_in_seconds)}</div>
+              </div>
+              <div class="stat-pill">
+                <div class="label">下次可动作</div>
+                <div class="value" data-next-action="${account.next_action_in_seconds}">${formatDuration(account.next_action_in_seconds)}</div>
+              </div>
+            </div>
+
+            <!-- Sparkline -->
+            <div class="sparkline-wrap">
+              <div class="sparkline-header">
+                <span>粉丝变化趋势</span>
+                <span class="sparkline-delta">${escapeHtml(followerDelta)}</span>
+              </div>
+              ${renderFollowerSparkline(account.follower_history || [])}
+            </div>
+
+            <!-- Budget bars -->
+            <div style="margin-top:14px;">
+              <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-muted); margin-bottom:6px;">今日配额</div>
+              <div class="budget-list">${barHtml}</div>
+            </div>
+
+            <!-- Schedule chips -->
+            <div class="chip-row" style="margin-top:12px;">
+              <span class="chip">抓取: 每 ${escapeHtml(fetchSchedule.base_interval_minutes || 0)}m ±${escapeHtml(fetchSchedule.interval_jitter_minutes || 0)}m</span>
+              <span class="chip">静默: ${escapeHtml(quietHours)}</span>
+              <span class="chip">上次抓取: ${escapeHtml(formatDate(account.last_fetch_finished_at))}</span>
+              <span class="chip">最新推文: ${escapeHtml(formatDate(account.latest_tweet_at))}</span>
+            </div>
+
+            ${account.last_error_message ? `
+              <div style="margin-top:10px; padding:8px 12px; background:var(--bad-dim); border:1px solid rgba(248,113,113,0.2); border-radius:var(--radius-sm);">
+                <span style="font-size:11.5px; color:var(--bad);">⚠ ${escapeHtml(account.last_error_message)}</span>
+              </div>
+            ` : ""}
+          </div>
+        `;
+      }
+
+      function renderAccounts(accounts) {
+        if (!accounts.length) {
+          accountsList.innerHTML = '<div class="empty-state">还没有加载到账号配置。</div>';
+          return;
+        }
+        accountsList.innerHTML = accounts.map(accountCard).join("");
+      }
+
+      function renderOperations(operations) {
+        if (!operations.length) {
+          operationsList.innerHTML = '<div class="empty-state" style="margin: 16px 0;">暂无运行日志。</div>';
+          return;
+        }
+        operationsList.innerHTML = operations.map(op => `
+          <div class="op-row">
+            <div class="op-dot ${opDotClass(op.status)}"></div>
+            <div class="op-content">
+              <div class="op-title">${escapeHtml(op.account_id)} · ${escapeHtml(op.operation_type)}</div>
+              <div class="op-detail">
+                <span class="chip ${chipClass(op.status)}" style="font-size:10.5px; padding:2px 7px;">${escapeHtml(op.status)}</span>
+                ${op.message ? ` ${escapeHtml(op.message)}` : ""}
+              </div>
+            </div>
+            <div class="op-time">${escapeHtml(formatDate(op.created_at))}</div>
+          </div>
+        `).join("");
+      }
+
+      async function fetchJson(url, options = {}) {
+        const response = await fetch(url, {
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+        if (!response.ok) {
+          let detail = response.statusText;
+          try { const body = await response.json(); detail = body.detail || JSON.stringify(body); } catch {}
+          throw new Error(detail);
+        }
+        if (response.status === 204) return null;
+        return response.json();
+      }
+
+      async function loadDashboard() {
+        const dashboard = await fetchJson("/admin/dashboard");
+        state.dashboard = dashboard;
+        state.accounts = dashboard.accounts || [];
+        renderSummary(dashboard.summary);
+        renderRuntimeSettings(dashboard.runtime_settings);
+        renderAccounts(state.accounts);
+        renderOperations(dashboard.recent_operations || []);
+        startCountdowns();
+      }
+
+      async function loadCookieCandidates() {
+        const candidates = await fetchJson("/admin/cookie-import/candidates");
+        state.cookieCandidates = candidates;
+        renderCookieCandidates(candidates);
+        const current = candidates.find(c => c.source_file === importSource.value) || null;
+        renderCookiePreview(current);
+      }
+
+      function startCountdowns() {
+        if (state.countdownTimer) clearInterval(state.countdownTimer);
+        state.countdownTimer = window.setInterval(() => {
+          document.querySelectorAll("[data-daily-reset]").forEach(node => {
+            const next = Math.max(0, Number(node.dataset.dailyReset || "0") - 1);
+            node.dataset.dailyReset = String(next);
+            node.textContent = formatDuration(next);
+          });
+          document.querySelectorAll("[data-next-action]").forEach(node => {
+            const next = Math.max(0, Number(node.dataset.nextAction || "0") - 1);
+            node.dataset.nextAction = String(next);
+            node.textContent = formatDuration(next);
+          });
+        }, 1000);
+      }
+
+      // Events
+      document.getElementById("refresh-btn").addEventListener("click", async () => {
+        setStatus("正在刷新...", "");
+        try { await loadDashboard(); setStatus("已刷新", "ok"); } catch (e) { setStatus(`刷新失败: ${e.message}`, "bad"); }
+      });
+
+      document.getElementById("reload-btn").addEventListener("click", async () => {
+        setStatus("正在热重载配置...", "");
+        try {
+          const r = await fetchJson("/admin/config/reload", { method: "POST" });
+          await loadDashboard();
+          await loadCookieCandidates();
+          setStatus(`配置已重载 — 新增 ${r.new_accounts} / 更新 ${r.updated_accounts} / 移除 ${r.removed_accounts}`, "ok");
+        } catch (e) { setStatus(`重载失败: ${e.message}`, "bad"); }
+      });
+
+      importSource.addEventListener("change", () => {
+        const c = state.cookieCandidates.find(c => c.source_file === importSource.value) || null;
+        if (c) { importId.value = c.suggested_account_id; importHandle.value = c.suggested_twitter_handle; }
+        renderCookiePreview(c);
+      });
+
+      document.getElementById("cookie-import-refresh").addEventListener("click", async () => {
+        setStatus("正在刷新候选文件...", "");
+        try { await loadCookieCandidates(); setStatus("候选文件已刷新", "ok"); } catch (e) { setStatus(`刷新失败: ${e.message}`, "bad"); }
+      });
+
+      accountsList.addEventListener("click", async (event) => {
+        const target = event.target.closest("button");
+        if (!target) return;
+        const validateId = target.dataset.validateAccount;
+        const fetchId    = target.dataset.fetchAccount;
+        const toggleId   = target.dataset.toggleAccount;
+        try {
+          if (validateId) {
+            setStatus(`正在校验 ${validateId} 会话...`, "");
+            const r = await fetchJson(`/admin/accounts/${encodeURIComponent(validateId)}/validate-session`, { method: "POST" });
+            await loadDashboard();
+            setStatus(`${validateId}: ${r.ok ? "会话有效" : r.detail || "校验失败"}`, r.ok ? "ok" : "bad");
+          } else if (fetchId) {
+            setStatus(`正在为 ${fetchId} 入队抓取...`, "");
+            const r = await fetchJson(`/admin/accounts/${encodeURIComponent(fetchId)}/fetch-now`, { method: "POST" });
+            setStatus(`${fetchId}: ${r.enqueued ? "已入队" : r.detail || "未入队"}`, r.enqueued ? "ok" : "warn");
+          } else if (toggleId) {
+            const nextState = target.dataset.nextState;
+            setStatus(`正在${nextState === "disable" ? "停用" : "启用"} ${toggleId}...`, "");
+            await fetchJson(`/admin/accounts/${encodeURIComponent(toggleId)}/${nextState}`, { method: "POST" });
+            await loadDashboard();
+            setStatus(`${toggleId} 已${nextState === "disable" ? "停用" : "启用"}`, "ok");
+          }
+        } catch (e) { setStatus(`操作失败: ${e.message}`, "bad"); }
+      });
+
+      document.getElementById("runtime-quick-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const s = state.dashboard?.runtime_settings;
+        if (!s) { setStatus("全局设置还没加载完成", "warn"); return; }
+        setStatus("正在保存全局开关...", "");
+        try {
+          const r = await fetchJson("/admin/runtime-settings", {
+            method: "PUT",
+            body: JSON.stringify({
+              ai_enabled: quickAiEnabled.checked,
+              fetch_recent_window_hours: s.fetch_recent_window_hours,
+              fetch_latest_first: s.fetch_latest_first,
+              fetch_include_replies: quickFetchReplies.checked,
+              fetch_include_retweets: quickFetchRetweets.checked,
+              llm_provider: s.llm_provider,
+              llm_base_url: s.llm_base_url,
+              llm_model_id: s.llm_model_id,
+              llm_api_key: null,
+              replace_api_key: false,
+            }),
+          });
+          await loadDashboard();
+          const msg = quickAiEnabled.checked
+            ? `全局开关已保存，AI 自动评分已开启，本次补评分 ${r.auto_scored_tweets || 0} 条`
+            : "全局开关已保存，AI 自动评分已关闭";
+          setStatus(msg, "ok");
+        } catch (e) { setStatus(`保存失败: ${e.message}`, "bad"); }
+      });
+
+      document.getElementById("cookie-import-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!importSource.value) { setStatus("请先选择一个 cookie 文件", "warn"); return; }
+        const payload = {
+          source_file: importSource.value,
+          id: importId.value.trim() || null,
+          twitter_handle: importHandle.value.trim() || null,
+          enabled: importEnabled.checked,
+          execution_mode: importMode.value,
+          extra_yaml: importExtraYaml.value.trim() || null,
+        };
+        setStatus(`正在从 ${payload.source_file} 导入新账号...`, "");
+        try {
+          const r = await fetchJson("/admin/cookie-import/accounts", { method: "POST", body: JSON.stringify(payload) });
+          await loadDashboard();
+          await loadCookieCandidates();
+          document.getElementById("cookie-import-form").reset();
+          renderCookiePreview(null);
+          setStatus(`${r.account.account.id} 已导入，会话校验: ${r.validation_ok ? "可用" : r.validation_detail || "失败"}`, r.validation_ok ? "ok" : "warn");
+        } catch (e) { setStatus(`导入失败: ${e.message}`, "bad"); }
+      });
+
+      Promise.all([loadDashboard(), loadCookieCandidates()])
+        .then(() => setStatus("控制台已就绪", "ok"))
+        .catch(e => setStatus(`初始化失败: ${e.message}`, "bad"));
+
+      window.setInterval(() => { loadDashboard().catch(() => {}); }, 30000);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,1 @@
+"""OptMonster application package."""

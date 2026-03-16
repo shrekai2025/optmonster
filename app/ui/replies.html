@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OptMonster · 回复处理</title>
+    <link rel="stylesheet" href="/ui/theme.css" />
+    <style>
+      .layout-replies {
+        display: grid;
+        grid-template-columns: minmax(300px, 0.9fr) minmax(0, 1.25fr);
+        gap: 20px;
+        align-items: start;
+      }
+
+      .reply-card {
+        padding: 14px 16px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--bg-surface);
+        cursor: pointer;
+        transition: border-color var(--transition), background var(--transition), transform var(--transition);
+      }
+      .reply-card:hover {
+        border-color: var(--border-medium);
+        background: var(--bg-elevated);
+        transform: translateY(-1px);
+      }
+      .reply-card.active {
+        border-color: rgba(108,140,255,0.45);
+        background: var(--accent-glow);
+      }
+
+      .reply-account {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+      }
+
+      .tweet-preview {
+        margin-top: 8px;
+        font-size: 12.5px;
+        line-height: 1.6;
+        color: var(--text-secondary);
+        white-space: pre-wrap;
+        word-break: break-word;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .draft-preview {
+        margin-top: 8px;
+        font-size: 12.5px;
+        line-height: 1.65;
+        color: var(--text);
+        font-style: italic;
+        padding: 8px 10px;
+        background: var(--accent-glow);
+        border-left: 2px solid var(--accent);
+        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      }
+
+      .detail-card {
+        padding: 16px 18px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+
+      .detail-tweet-text {
+        margin-top: 10px;
+        font-size: 14px;
+        line-height: 1.7;
+        color: var(--text-secondary);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .detail-draft-text {
+        margin-top: 8px;
+        font-size: 13.5px;
+        line-height: 1.7;
+        color: var(--text);
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .approve-box {
+        padding: 16px 18px;
+        background: var(--accent-glow);
+        border: 1px solid rgba(108,140,255,0.25);
+        border-radius: var(--radius-md);
+      }
+
+      .filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 12px 14px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        margin-bottom: 16px;
+      }
+      .filter-bar select {
+        width: auto;
+        min-width: 130px;
+        padding: 7px 28px 7px 10px;
+        font-size: 12.5px;
+      }
+
+      @media (max-width: 1100px) {
+        .layout-replies { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="topnav">
+      <span class="topnav-brand">Opt<span>Monster</span></span>
+      <div class="topnav-divider"></div>
+      <a href="/console">账号总览</a>
+      <a href="/console/tweets">推文工作台</a>
+      <a href="/console/replies" class="active">回复处理</a>
+      <a href="/console/ai">AI 设置</a>
+      <a href="/console/ai/logs">AI 日志</a>
+      <div class="topnav-actions">
+        <button id="refresh-btn">刷新</button>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <div class="page-header">
+        <div class="page-header-inner">
+          <div class="page-title-group">
+            <p class="page-eyebrow">Reply Workspace</p>
+            <h1 class="page-title">回复处理</h1>
+            <p class="page-subtitle">集中处理 AI 已生成的待发送回复</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="status-bar" class="status-bar">
+        <div class="status-dot"></div>
+        <span id="status-text">正在初始化...</span>
+      </div>
+
+      <div class="filter-bar">
+        <select id="account-filter"><option value="">全部账号</option></select>
+      </div>
+
+      <div class="layout-replies">
+        <!-- Left: pending replies list -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <p class="card-eyebrow">Pending Replies</p>
+              <p class="card-title">待处理回复</p>
+            </div>
+          </div>
+          <div class="card-body" style="padding:12px;">
+            <div id="reply-list" style="display:grid; gap:8px;"></div>
+          </div>
+        </div>
+
+        <!-- Right: reply detail -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <p class="card-eyebrow">Reply Detail</p>
+              <p class="card-title">修改与提交</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="reply-detail" class="empty-state">
+              从左侧选择一条待处理回复，这里会展示原推文、AI 草稿和编辑区。
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const state = {
+        accounts: [],
+        items: [],
+        selectedActionId: null,
+      };
+
+      const accountFilter = document.getElementById("account-filter");
+      const replyList   = document.getElementById("reply-list");
+      const replyDetail = document.getElementById("reply-detail");
+      const statusText  = document.getElementById("status-text");
+      const statusBar   = document.getElementById("status-bar");
+
+      function setStatus(message, level = "") {
+        statusText.textContent = message;
+        statusBar.className = "status-bar" + (level ? " " + level : "");
+      }
+
+      function escapeHtml(v) {
+        return String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+      }
+
+      function chipClass(v) {
+        if (["enabled","healthy","valid","success","succeeded"].includes(v)) return "ok";
+        if (["pending_approval","approved","executing","warn"].includes(v)) return "warn";
+        if (["failed","rejected","expired"].includes(v)) return "bad";
+        return "";
+      }
+
+      function formatDate(v) {
+        if (!v) return "n/a";
+        return new Date(v).toLocaleString();
+      }
+
+      async function fetchJson(url, options = {}) {
+        const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
+        if (!response.ok) {
+          let detail = response.statusText;
+          try { const body = await response.json(); detail = body.detail || JSON.stringify(body); } catch {}
+          throw new Error(detail);
+        }
+        return response.status === 204 ? null : response.json();
+      }
+
+      function renderAccountFilter() {
+        const selected = accountFilter.value;
+        accountFilter.innerHTML = '<option value="">全部账号</option>' +
+          state.accounts.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.id)}</option>`).join("");
+        accountFilter.value = selected;
+      }
+
+      function replyCard(item) {
+        const active = state.selectedActionId === item.id ? "active" : "";
+        const draft = item.final_draft || item.edited_draft || item.ai_draft || "";
+        const score = item.relevance_score;
+        const conf  = item.reply_confidence;
+        return `
+          <div class="reply-card ${active}" data-action-id="${item.id}">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+              <div>
+                <div class="reply-account">${escapeHtml(item.account_twitter_handle)} <span style="font-weight:400; color:var(--text-muted);">· ${escapeHtml(item.account_id)}</span></div>
+                <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">回复 ${escapeHtml(item.tweet_author_handle || "unknown author")}</div>
+              </div>
+              <span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">${escapeHtml(formatDate(item.created_at))}</span>
+            </div>
+            <p class="tweet-preview">${escapeHtml(item.tweet_text || "这条回复没有关联原推文正文。")}</p>
+            <p class="draft-preview">${escapeHtml(draft || "AI 未生成回复草稿")}</p>
+            <div class="chip-row">
+              <span class="chip ${chipClass(item.status)}">${escapeHtml(item.status)}</span>
+              ${score != null ? `<span class="chip">score: ${escapeHtml(score)} / 10</span>` : ""}
+              ${conf  != null ? `<span class="chip">confidence: ${escapeHtml(conf)} / 10</span>` : ""}
+            </div>
+          </div>
+        `;
+      }
+
+      function renderList() {
+        if (!state.items.length) {
+          replyList.innerHTML = '<div class="empty-state">当前没有待处理回复。</div>';
+          return;
+        }
+        replyList.innerHTML = state.items.map(replyCard).join("");
+      }
+
+      function renderDetail(item) {
+        const draft = item.final_draft || item.edited_draft || item.ai_draft || "";
+        const score = item.relevance_score;
+        const conf  = item.reply_confidence;
+        replyDetail.innerHTML = `
+          <div style="display:grid; gap:14px;">
+            <!-- Original tweet -->
+            <div class="detail-card">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                <div>
+                  <div style="font-size:14px; font-weight:600; color:var(--text);">${escapeHtml(item.account_twitter_handle)} <span style="font-weight:400; color:var(--text-muted);">· ${escapeHtml(item.account_id)}</span></div>
+                  <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">回复 ${escapeHtml(item.tweet_author_handle || "unknown author")}</div>
+                </div>
+                ${item.tweet_url ? `<a href="${escapeHtml(item.tweet_url)}" target="_blank" rel="noreferrer" style="font-size:12px; flex-shrink:0;">打开原推 ↗</a>` : ""}
+              </div>
+              <p class="detail-tweet-text">${escapeHtml(item.tweet_text || "这条回复没有关联原推文正文。")}</p>
+              <div class="chip-row">
+                <span class="chip ${chipClass(item.status)}">${escapeHtml(item.status)}</span>
+                <span class="chip">mode: ${escapeHtml(item.requested_execution_mode)}</span>
+                ${score != null ? `<span class="chip">score: ${escapeHtml(score)} / 10</span>` : ""}
+                ${conf  != null ? `<span class="chip">confidence: ${escapeHtml(conf)} / 10</span>` : ""}
+              </div>
+            </div>
+
+            <!-- AI draft -->
+            <div class="detail-card">
+              <div style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted);">AI 草稿</div>
+              <p class="detail-draft-text">${escapeHtml(item.ai_draft || "AI 未生成草稿。")}</p>
+            </div>
+
+            <!-- Edit & approve -->
+            <div class="approve-box">
+              <div style="font-size:13px; font-weight:600; color:var(--accent); margin-bottom:8px;">编辑后提交</div>
+              <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">批准会直接发送当前草稿；修改后批准会把人工版本写入学习链路。</p>
+              <textarea id="reply-editor">${escapeHtml(draft)}</textarea>
+              <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+                <button id="approve-btn" data-action-id="${item.id}">直接批准发送</button>
+                <button id="modify-btn" class="secondary" data-action-id="${item.id}">修改并批准</button>
+                <button id="skip-btn" class="ghost" data-action-id="${item.id}">跳过</button>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      async function loadAccounts() {
+        const accounts = await fetchJson("/admin/accounts");
+        state.accounts = accounts.slice().sort((a, b) => a.id.localeCompare(b.id));
+        renderAccountFilter();
+      }
+
+      async function loadWorkspace() {
+        const params = new URLSearchParams();
+        if (accountFilter.value) params.set("account_id", accountFilter.value);
+        params.set("limit", "120");
+        state.items = await fetchJson(`/admin/reply-workspace?${params.toString()}`);
+        renderList();
+        if (state.selectedActionId) {
+          const current = state.items.find(i => i.id === state.selectedActionId);
+          if (current) renderDetail(current);
+          else {
+            state.selectedActionId = null;
+            replyDetail.innerHTML = '<div class="empty-state">当前筛选下没有选中的待处理回复。</div>';
+          }
+        }
+      }
+
+      replyList.addEventListener("click", (event) => {
+        const target = event.target.closest("[data-action-id]");
+        if (!target) return;
+        const actionId = Number(target.dataset.actionId);
+        const item = state.items.find(e => e.id === actionId);
+        if (!item) return;
+        state.selectedActionId = actionId;
+        renderList();
+        renderDetail(item);
+        setStatus(`已载入待处理回复 ${actionId}`, "ok");
+      });
+
+      replyDetail.addEventListener("click", async (event) => {
+        const target = event.target.closest("button");
+        if (!target) return;
+        const actionId = Number(target.dataset.actionId);
+        if (!actionId) return;
+        try {
+          if (target.id === "approve-btn") {
+            setStatus("正在批准回复...");
+            await fetchJson(`/admin/actions/${actionId}/approve`, { method: "POST", body: JSON.stringify({}) });
+          } else if (target.id === "modify-btn") {
+            const textarea = document.getElementById("reply-editor");
+            setStatus("正在提交修改版回复...");
+            await fetchJson(`/admin/actions/${actionId}/modify`, {
+              method: "POST",
+              body: JSON.stringify({ final_draft: textarea.value, reason: "modified from reply workspace" }),
+            });
+          } else if (target.id === "skip-btn") {
+            setStatus("正在跳过回复...");
+            await fetchJson(`/admin/actions/${actionId}/skip`, {
+              method: "POST",
+              body: JSON.stringify({ reason: "skipped from reply workspace" }),
+            });
+          } else { return; }
+          await loadWorkspace();
+          setStatus("回复处理状态已更新", "ok");
+        } catch (e) { setStatus(`操作失败: ${e.message}`, "bad"); }
+      });
+
+      accountFilter.addEventListener("change", () => {
+        loadWorkspace().catch(e => setStatus(`加载失败: ${e.message}`, "bad"));
+      });
+
+      document.getElementById("refresh-btn").addEventListener("click", () => {
+        Promise.all([loadAccounts(), loadWorkspace()])
+          .then(() => setStatus("回复处理页已刷新", "ok"))
+          .catch(e => setStatus(`刷新失败: ${e.message}`, "bad"));
+      });
+
+      Promise.all([loadAccounts(), loadWorkspace()])
+        .then(() => setStatus("回复处理页已就绪", "ok"))
+        .catch(e => setStatus(`初始化失败: ${e.message}`, "bad"));
+    </script>
+  </body>
+</html>

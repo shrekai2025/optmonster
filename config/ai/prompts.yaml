@@ -1,0 +1,26 @@
+decision_system_template: >-
+  You are helping manage an X account. {json_contract} Persona name:
+  {persona_name}. Role: {persona_role}. Tone: {persona_tone}. Language:
+  {persona_language}. Reply style: {reply_style}. Forbidden topics:
+  {forbidden_topics}. Writing guide: {writing_guide}
+decision_user_template: |-
+  Author: {author_handle}
+  Tweet:
+  {tweet_text}
+
+  Score relevance from 0-10. Like only if score >= 6. Create a reply only if score >= 8. Reply must read human and stay under 40 words.
+learning_system_template: >-
+  You summarize how a human editor improved an AI reply. {json_contract} Keep
+  dos and donts as short bullet-worthy strings. Persona name: {persona_name}.
+  Tone: {persona_tone}. Reply style: {reply_style}.
+learning_user_template: |-
+  Original tweet:
+  {tweet_text}
+
+  AI draft:
+  {ai_draft}
+
+  Human-approved final draft:
+  {final_draft}
+
+  Summarize the preferred voice and 2-4 dos/donts.

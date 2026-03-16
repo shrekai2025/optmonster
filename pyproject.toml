@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "optmonster"
+version = "0.1.0"
+description = "Twitter account foundation for isolated read-only ingestion."
+readme = "README.md"
+requires-python = ">=3.13,<3.15"
+license = { text = "MIT" }
+authors = [
+  { name = "Codex" }
+]
+dependencies = [
+  "alembic>=1.16.0,<2.0.0",
+  "asyncpg>=0.30.0,<1.0.0",
+  "aiosqlite>=0.21.0,<1.0.0",
+  "fastapi>=0.116.0,<1.0.0",
+  "greenlet>=3.1.0,<4.0.0",
+  "httpx>=0.28.0,<1.0.0",
+  "orjson>=3.10.0,<4.0.0",
+  "pydantic-settings>=2.10.0,<3.0.0",
+  "PyYAML>=6.0.2,<7.0.0",
+  "redis[hiredis]>=6.0.0,<7.0.0",
+  "sqlalchemy>=2.0.40,<3.0.0",
+  "twikit>=2.3.0,<3.0.0",
+  "uvicorn[standard]>=0.35.0,<1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "fakeredis>=2.31.0,<3.0.0",
+  "pytest>=8.4.0,<9.0.0",
+  "pytest-asyncio>=1.1.0,<2.0.0",
+  "pytest-cov>=6.2.0,<7.0.0",
+  "ruff>=0.12.0,<1.0.0",
+]
+
+[project.scripts]
+optmonster-api = "app.main:run"
+optmonster-worker = "app.worker:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = [
+  "error",
+  "ignore::DeprecationWarning:httpx.*",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC"]

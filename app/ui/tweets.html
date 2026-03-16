@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OptMonster · 推文工作台</title>
+    <link rel="stylesheet" href="/ui/theme.css" />
+    <style>
+      .layout-tweets {
+        display: grid;
+        grid-template-columns: minmax(300px, 0.9fr) minmax(0, 1.4fr);
+        gap: 20px;
+        align-items: start;
+      }
+
+      /* Tweet card in list */
+      .tweet-card {
+        padding: 14px 16px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--bg-surface);
+        cursor: pointer;
+        transition: border-color var(--transition), background var(--transition), transform var(--transition);
+      }
+      .tweet-card:hover {
+        border-color: var(--border-medium);
+        background: var(--bg-elevated);
+        transform: translateY(-1px);
+      }
+      .tweet-card.active {
+        border-color: rgba(108,140,255,0.45);
+        background: var(--accent-glow);
+      }
+
+      .tweet-author {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+      }
+      .tweet-source {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 2px;
+      }
+      .tweet-text {
+        margin-top: 10px;
+        font-size: 13px;
+        line-height: 1.65;
+        color: var(--text-secondary);
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+        display: -webkit-box;
+        -webkit-line-clamp: 4;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      /* Detail panel */
+      .detail-card {
+        padding: 16px 18px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--bg-surface);
+      }
+
+      .detail-tweet-text {
+        margin-top: 12px;
+        font-size: 14px;
+        line-height: 1.7;
+        color: var(--text);
+        white-space: pre-wrap;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+      }
+
+      /* Action card */
+      .action-card {
+        padding: 14px 16px;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+      }
+
+      .action-card h3 {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        margin-bottom: 6px;
+      }
+
+      /* Coverage pill */
+      .coverage-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .coverage-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--bg-overlay);
+        font-size: 12px;
+      }
+      .coverage-pill button {
+        padding: 3px 8px;
+        font-size: 11px;
+        border-radius: 999px;
+      }
+
+      /* Approve/edit box */
+      .approve-box {
+        padding: 14px 16px;
+        border-radius: var(--radius-md);
+        border: 1px solid rgba(108,140,255,0.25);
+        background: var(--accent-glow);
+      }
+      .approve-box h3 {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--accent);
+        margin-bottom: 8px;
+      }
+
+      /* Filter bar */
+      .filter-bar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        padding: 12px 14px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        margin-bottom: 16px;
+      }
+      .filter-bar select {
+        width: auto;
+        min-width: 130px;
+        padding: 7px 28px 7px 10px;
+        font-size: 12.5px;
+      }
+
+      .maintenance-actions {
+        display: flex;
+        gap: 8px;
+        margin-left: auto;
+      }
+
+      @media (max-width: 1100px) {
+        .layout-tweets { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="topnav">
+      <span class="topnav-brand">Opt<span>Monster</span></span>
+      <div class="topnav-divider"></div>
+      <a href="/console">账号总览</a>
+      <a href="/console/tweets" class="active">推文工作台</a>
+      <a href="/console/replies">回复处理</a>
+      <a href="/console/ai">AI 设置</a>
+      <a href="/console/ai/logs">AI 日志</a>
+      <div class="topnav-actions">
+        <button id="refresh-btn">刷新</button>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <div class="page-header">
+        <div class="page-header-inner">
+          <div class="page-title-group">
+            <p class="page-eyebrow">Tweet Workspace</p>
+            <h1 class="page-title">推文工作台</h1>
+            <p class="page-subtitle">查看抓到的推文，生成回复，审批或修改</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status -->
+      <div id="status-bar" class="status-bar">
+        <div class="status-dot"></div>
+        <span id="status-text">正在初始化...</span>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="filter-bar">
+        <select id="account-filter"><option value="">全部账号</option></select>
+        <select id="source-filter">
+          <option value="">全部来源</option>
+          <option value="timeline">timeline</option>
+          <option value="watch_user">watch_user</option>
+          <option value="keyword_search">keyword_search</option>
+        </select>
+        <select id="interaction-filter">
+          <option value="">全部状态</option>
+          <option value="unscored">未评分</option>
+          <option value="scored_no_action">已评分未操作</option>
+          <option value="acted">已操作</option>
+        </select>
+        <div class="maintenance-actions">
+          <button id="cleanup-btn" class="ghost" style="font-size:12px; padding:7px 12px;">清理过期推文</button>
+          <button id="backfill-ai-btn" class="ghost" style="font-size:12px; padding:7px 12px;">补跑未评分 AI</button>
+        </div>
+      </div>
+
+      <div class="layout-tweets">
+        <!-- Left: tweet list -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <p class="card-eyebrow">Tweets</p>
+              <p class="card-title">最近抓取</p>
+            </div>
+          </div>
+          <div class="card-body" style="padding:12px;">
+            <div id="tweets-list" style="display:grid; gap:8px;"></div>
+          </div>
+        </div>
+
+        <!-- Right: detail -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <p class="card-eyebrow">Tweet Detail</p>
+              <p class="card-title">详情与审批</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="tweet-detail" class="empty-state">
+              从左侧选择一条推文，这里会展示 AI 回复、动作历史和原始 payload。
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const state = {
+        accounts: [],
+        tweets: [],
+        selectedTweetId: null,
+      };
+
+      const tweetsList      = document.getElementById("tweets-list");
+      const tweetDetail     = document.getElementById("tweet-detail");
+      const statusText      = document.getElementById("status-text");
+      const statusBar       = document.getElementById("status-bar");
+      const accountFilter   = document.getElementById("account-filter");
+      const sourceFilter    = document.getElementById("source-filter");
+      const interactionFilter = document.getElementById("interaction-filter");
+
+      function escapeHtml(v) {
+        return String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+      }
+
+      function setStatus(message, level = "") {
+        statusText.textContent = message;
+        statusBar.className = "status-bar" + (level ? " " + level : "");
+      }
+
+      function chipClass(v) {
+        if (["success","succeeded","enabled","applied"].includes(v)) return "ok";
+        if (["approved","pending_approval","executing","warn"].includes(v)) return "warn";
+        if (["failed","rejected","expired"].includes(v)) return "bad";
+        return "";
+      }
+
+      function formatDate(v) {
+        if (!v) return "n/a";
+        return new Date(v).toLocaleString();
+      }
+
+      function sourceScopeLabel(tweet) {
+        return `${tweet.account_id} · ${tweet.source_type} · ${tweet.source_key}`;
+      }
+
+      function interactionMeta(v) {
+        if (v === "acted") return { label: "已操作", cls: "ok" };
+        if (v === "scored_no_action") return { label: "评分无动作", cls: "warn" };
+        return { label: "未评分", cls: "" };
+      }
+
+      function failureExplanation(code) {
+        const map = {
+          account_paused: "账号当前处于暂停状态，系统不会继续执行动作。",
+          admin_disabled: "账号已被后台停用，需要重新启用后才会执行动作。",
+          budget_exceeded: "今天这类动作的额度已经用完了。",
+          execution_mode_blocked: "当前账号还是只读或演练模式，系统不会真实执行这个动作。",
+          execution_failed: "调用 X/Twitter 执行动作时失败了，可以稍后重试。",
+          interval_not_elapsed: "距离上一次动作太近，还没有达到最小间隔时间。",
+          llm_failed: "AI 处理这条推文时失败了，所以动作没有继续执行。",
+          outside_active_hours: "当前时间不在账号允许的行为时段内。",
+        };
+        return map[String(code || "").trim()] || "";
+      }
+
+      function describeActionFailure(action) {
+        if (!action) return "";
+        const code = action.error_code || "";
+        const message = action.error_message || "";
+        const explanation = failureExplanation(code);
+        if (!message) return explanation || code || "unknown failure";
+        if (!explanation) return message;
+        const norm = s => String(s || "").toLowerCase().replaceAll(/[_-]+/g," ").trim();
+        if (norm(message) === norm(code)) return explanation;
+        return `${message}。${explanation}`;
+      }
+
+      async function fetchJson(url, options = {}) {
+        const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
+        if (!response.ok) {
+          let detail = response.statusText;
+          try { const body = await response.json(); detail = body.detail || JSON.stringify(body); } catch {}
+          throw new Error(detail);
+        }
+        return response.status === 204 ? null : response.json();
+      }
+
+      function tweetCard(tweet) {
+        const active = state.selectedTweetId === tweet.id ? "active" : "";
+        const replyState = tweet.latest_reply_action?.status || "no-reply";
+        const likeState  = tweet.latest_like_action?.status  || "no-like";
+        const inter = interactionMeta(tweet.interaction_state);
+        const score = tweet.latest_decision?.relevance_score;
+        return `
+          <div class="tweet-card ${active}" data-tweet-id="${tweet.id}">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+              <div>
+                <div class="tweet-author">${escapeHtml(tweet.author_handle || tweet.account_id)}</div>
+                <div class="tweet-source">${escapeHtml(sourceScopeLabel(tweet))}</div>
+              </div>
+              <span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">${escapeHtml(formatDate(tweet.fetched_at))}</span>
+            </div>
+            <p class="tweet-text">${escapeHtml(tweet.text)}</p>
+            <div class="chip-row">
+              <span class="chip ${inter.cls}">AI: ${escapeHtml(inter.label)}</span>
+              ${score != null ? `<span class="chip">${escapeHtml(score)} / 10</span>` : ""}
+              <span class="chip ${chipClass(replyState)}">reply: ${escapeHtml(replyState)}</span>
+              <span class="chip ${chipClass(likeState)}">like: ${escapeHtml(likeState)}</span>
+            </div>
+          </div>
+        `;
+      }
+
+      function filteredTweets() {
+        if (!interactionFilter?.value) return state.tweets;
+        return state.tweets.filter(t => t.interaction_state === interactionFilter.value);
+      }
+
+      function renderTweets() {
+        const tweets = filteredTweets();
+        if (!tweets.length) {
+          tweetsList.innerHTML = '<div class="empty-state">当前筛选条件下还没有推文。</div>';
+          return;
+        }
+        tweetsList.innerHTML = tweets.map(tweetCard).join("");
+      }
+
+      function renderAccountFilter() {
+        const selected = accountFilter.value;
+        accountFilter.innerHTML = '<option value="">全部账号</option>' + state.accounts.map(a => {
+          const status = a.lifecycle_status === "enabled" ? "启用" : "暂停";
+          return `<option value="${escapeHtml(a.id)}">${escapeHtml(a.id)} · ${escapeHtml(status)}</option>`;
+        }).join("");
+        accountFilter.value = selected;
+      }
+
+      function actionCard(action) {
+        const score = action.relevance_score;
+        const conf  = action.reply_confidence;
+        return `
+          <div class="action-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <h3>${escapeHtml(action.action_type)}</h3>
+              <span class="chip ${chipClass(action.status)}">${escapeHtml(action.status)}</span>
+            </div>
+            <div class="chip-row" style="margin-top:8px;">
+              <span class="chip">requested: ${escapeHtml(action.requested_execution_mode)}</span>
+              <span class="chip">applied: ${escapeHtml(action.applied_execution_mode || "n/a")}</span>
+              <span class="chip">learning: ${escapeHtml(action.learning_status)}</span>
+            </div>
+            ${score != null ? `<p style="margin-top:10px;font-size:13px;">relevance: <strong>${escapeHtml(score)}</strong> / 10</p>` : ""}
+            ${conf  != null ? `<p style="margin-top:4px;font-size:12.5px; color:var(--text-secondary);">reply confidence: ${escapeHtml(conf)} / 10</p>` : ""}
+            ${action.ai_draft     ? `<div style="margin-top:10px;"><span style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em;">AI 草稿</span><p style="margin-top:4px; font-size:13px; line-height:1.65;">${escapeHtml(action.ai_draft)}</p></div>` : ""}
+            ${action.edited_draft ? `<div style="margin-top:10px;"><span style="font-size:11px; font-weight:600; color:var(--warn); text-transform:uppercase; letter-spacing:.06em;">人工修改</span><p style="margin-top:4px; font-size:13px; line-height:1.65;">${escapeHtml(action.edited_draft)}</p></div>` : ""}
+            ${action.final_draft  ? `<div style="margin-top:10px;"><span style="font-size:11px; font-weight:600; color:var(--ok); text-transform:uppercase; letter-spacing:.06em;">最终版本</span><p style="margin-top:4px; font-size:13px; line-height:1.65;">${escapeHtml(action.final_draft)}</p></div>` : ""}
+            ${action.error_message || action.error_code ? `<p style="margin-top:10px; font-size:12.5px; color:var(--bad);">⚠ ${escapeHtml(describeActionFailure(action))}</p>` : ""}
+          </div>
+        `;
+      }
+
+      function pendingEditor(action) {
+        if (!action || action.action_type !== "reply" || action.status !== "pending_approval") return "";
+        const draft = action.final_draft || action.ai_draft || action.content_draft || "";
+        return `
+          <div class="approve-box">
+            <h3>⏳ 待审批回复</h3>
+            <p style="font-size:12px; color:var(--text-secondary); margin-bottom:10px;">批准会直接走当前草稿；修改会把人工版本写入学习链路。</p>
+            <textarea id="reply-edit-box">${escapeHtml(draft)}</textarea>
+            <div style="display:flex; gap:8px; margin-top:10px;">
+              <button id="approve-btn" data-action-id="${action.id}">批准发送</button>
+              <button id="modify-btn" class="secondary" data-action-id="${action.id}">修改并批准</button>
+              <button id="skip-btn" class="ghost" data-action-id="${action.id}">跳过</button>
+            </div>
+          </div>
+        `;
+      }
+
+      function renderCoverageSection(items, { emptyText, addable }) {
+        if (!items.length) return `<div class="empty-state" style="padding:12px;">${escapeHtml(emptyText)}</div>`;
+        return `
+          <div class="coverage-list">
+            ${items.map(item => `
+              <div class="coverage-pill">
+                <span>${escapeHtml(item.twitter_handle)} <strong>${escapeHtml(item.account_id)}</strong></span>
+                ${item.latest_follow_action ? `<span class="chip ${chipClass(item.latest_follow_action.status)}" style="font-size:10px;">${escapeHtml(item.latest_follow_action.status)}</span>` : ""}
+                ${addable ? `<button data-follow-account="${escapeHtml(item.account_id)}" class="secondary" style="padding:3px 8px; font-size:11px;">+关注</button>` : ""}
+              </div>
+            `).join("")}
+          </div>
+        `;
+      }
+
+      function authorCoverageCard(tweet) {
+        const covered   = (tweet.author_coverage || []).filter(i => i.follows_author);
+        const uncovered = (tweet.author_coverage || []).filter(i => i.can_add_follow);
+        return `
+          <div class="detail-card">
+            <h3 style="font-size:13px; font-weight:600; color:var(--text);">作者覆盖范围</h3>
+            <p style="font-size:12px; color:var(--text-secondary); margin-top:6px;">
+              来源: <strong>${escapeHtml(sourceScopeLabel(tweet))}</strong>
+            </p>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:14px;">
+              <div>
+                <p style="font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); margin-bottom:6px;">已在关注范围</p>
+                ${renderCoverageSection(covered, { emptyText: "还没有账号把这个作者纳入 follow_users。", addable: false })}
+              </div>
+              <div>
+                <p style="font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--text-muted); margin-bottom:6px;">还没关注</p>
+                ${renderCoverageSection(uncovered, { emptyText: "全部账号都已覆盖这个作者。", addable: true })}
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      function detailView(tweet) {
+        const latestReply = tweet.actions.find(a => a.action_type === "reply") || null;
+        const inter = interactionMeta(tweet.interaction_state);
+        const score = tweet.latest_decision?.relevance_score;
+        return `
+          <div style="display:grid; gap:14px;">
+            <!-- Tweet detail card -->
+            <div class="detail-card">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                <div>
+                  <div style="font-size:15px; font-weight:600; color:var(--text);">${escapeHtml(tweet.author_handle || tweet.account_id)}</div>
+                  <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">${escapeHtml(sourceScopeLabel(tweet))}</div>
+                </div>
+                <a href="${escapeHtml(tweet.tweet_url)}" target="_blank" rel="noreferrer" style="font-size:12px; flex-shrink:0;">打开原推 ↗</a>
+              </div>
+              <p class="detail-tweet-text">${escapeHtml(tweet.text)}</p>
+              <div class="chip-row">
+                <span class="chip ${inter.cls}">AI: ${escapeHtml(inter.label)}</span>
+                ${score != null ? `<span class="chip">score: ${escapeHtml(score)} / 10</span>` : ""}
+                <span class="chip">创建: ${escapeHtml(formatDate(tweet.created_at_twitter))}</span>
+                <span class="chip">抓取: ${escapeHtml(formatDate(tweet.fetched_at))}</span>
+                ${tweet.latest_decision ? `<span class="chip ${chipClass(tweet.latest_decision.status)}">${escapeHtml(tweet.latest_decision.status)}</span>` : ""}
+              </div>
+              <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+                <button id="generate-btn" data-tweet-id="${tweet.id}" data-account-id="${escapeHtml(tweet.account_id)}">生成回复 / 点赞决策</button>
+                <a class="chip" href="/console/replies" style="font-size:12px; padding:8px 12px;">回复处理页 →</a>
+              </div>
+            </div>
+
+            ${authorCoverageCard(tweet)}
+            ${pendingEditor(latestReply)}
+
+            <!-- Actions history -->
+            ${tweet.actions.length
+              ? tweet.actions.map(actionCard).join("")
+              : '<div class="empty-state">这条推文还没有动作记录。</div>'}
+
+            <!-- Raw payload -->
+            <div class="action-card">
+              <h3>Raw Payload</h3>
+              <pre>${escapeHtml(JSON.stringify(tweet.raw_payload || {}, null, 2))}</pre>
+            </div>
+          </div>
+        `;
+      }
+
+      async function loadAccounts() {
+        const accounts = await fetchJson("/admin/accounts");
+        state.accounts = accounts.slice().sort((a, b) => a.id.localeCompare(b.id));
+        renderAccountFilter();
+      }
+
+      async function loadTweets() {
+        const params = new URLSearchParams();
+        if (accountFilter.value) params.set("account_id", accountFilter.value);
+        if (sourceFilter.value)  params.set("source_type", sourceFilter.value);
+        params.set("limit", "120");
+        const tweets = await fetchJson(`/admin/tweets?${params.toString()}`);
+        state.tweets = tweets;
+        renderTweets();
+        renderAccountFilter();
+        if (state.selectedTweetId) {
+          const exists = filteredTweets().find(t => t.id === state.selectedTweetId);
+          if (exists) await loadTweetDetail(state.selectedTweetId);
+          else {
+            state.selectedTweetId = null;
+            tweetDetail.innerHTML = '<div class="empty-state">当前筛选下没有选中的推文。</div>';
+          }
+        }
+      }
+
+      async function loadTweetDetail(tweetId) {
+        const detail = await fetchJson(`/admin/tweets/${tweetId}`);
+        state.selectedTweetId = detail.id;
+        tweetDetail.innerHTML = detailView(detail);
+        renderTweets();
+      }
+
+      // Event listeners
+      tweetsList.addEventListener("click", async (event) => {
+        const target = event.target.closest("[data-tweet-id]");
+        if (!target) return;
+        const tweetId = Number(target.dataset.tweetId);
+        setStatus(`正在读取推文 ${tweetId}...`);
+        try {
+          await loadTweetDetail(tweetId);
+          setStatus(`推文 ${tweetId} 已加载`, "ok");
+        } catch (e) { setStatus(`读取失败: ${e.message}`, "bad"); }
+      });
+
+      tweetDetail.addEventListener("click", async (event) => {
+        const target = event.target.closest("button");
+        if (!target) return;
+        try {
+          if (target.id === "generate-btn") {
+            setStatus("正在生成 AI 决策...");
+            await fetchJson(`/admin/tweets/${target.dataset.tweetId}/reply/generate`, {
+              method: "POST",
+              body: JSON.stringify({ account_id: target.dataset.accountId, trigger_source: "console" }),
+            });
+            await loadTweets();
+            await loadTweetDetail(Number(target.dataset.tweetId));
+            setStatus("AI 决策已生成", "ok");
+            return;
+          }
+          const actionId = target.dataset.actionId;
+          const followAccount = target.dataset.followAccount;
+          if (followAccount && state.selectedTweetId) {
+            setStatus(`正在把作者加入 ${followAccount} 的关注范围...`);
+            await fetchJson(`/admin/tweets/${state.selectedTweetId}/follow-targets/${encodeURIComponent(followAccount)}`, { method: "POST" });
+            await loadTweets();
+            await loadTweetDetail(state.selectedTweetId);
+            setStatus(`${followAccount} 已加入关注范围`, "ok");
+            return;
+          }
+          if (!actionId) return;
+          if (target.id === "approve-btn") {
+            setStatus("正在批准回复...");
+            await fetchJson(`/admin/actions/${actionId}/approve`, { method: "POST", body: JSON.stringify({}) });
+          } else if (target.id === "modify-btn") {
+            const textarea = document.getElementById("reply-edit-box");
+            setStatus("正在提交人工修改版...");
+            await fetchJson(`/admin/actions/${actionId}/modify`, {
+              method: "POST",
+              body: JSON.stringify({ final_draft: textarea.value, reason: "modified from tweet workspace" }),
+            });
+          } else if (target.id === "skip-btn") {
+            setStatus("正在跳过这条回复...");
+            await fetchJson(`/admin/actions/${actionId}/skip`, {
+              method: "POST",
+              body: JSON.stringify({ reason: "skipped from tweet workspace" }),
+            });
+          }
+          await loadTweets();
+          if (state.selectedTweetId) await loadTweetDetail(state.selectedTweetId);
+          setStatus("动作已更新", "ok");
+        } catch (e) { setStatus(`操作失败: ${e.message}`, "bad"); }
+      });
+
+      accountFilter.addEventListener("change", () => loadTweets().catch(e => setStatus(e.message, "bad")));
+      sourceFilter.addEventListener("change", () => loadTweets().catch(e => setStatus(e.message, "bad")));
+      interactionFilter.addEventListener("change", () => {
+        renderTweets();
+        if (state.selectedTweetId && !filteredTweets().some(t => t.id === state.selectedTweetId)) {
+          state.selectedTweetId = null;
+          tweetDetail.innerHTML = '<div class="empty-state">当前筛选下没有选中的推文。</div>';
+        }
+      });
+
+      document.getElementById("refresh-btn").addEventListener("click", () => {
+        loadTweets().then(() => setStatus("推文列表已刷新", "ok")).catch(e => setStatus(`刷新失败: ${e.message}`, "bad"));
+      });
+
+      document.getElementById("cleanup-btn").addEventListener("click", async () => {
+        setStatus("正在清理过期推文...");
+        try {
+          const r = await fetchJson("/admin/tweets/cleanup", {
+            method: "POST",
+            body: JSON.stringify({ account_id: accountFilter.value || null }),
+          });
+          await loadTweets();
+          if (state.selectedTweetId && !filteredTweets().some(t => t.id === state.selectedTweetId)) {
+            state.selectedTweetId = null;
+            tweetDetail.innerHTML = '<div class="empty-state">当前筛选下没有选中的推文。</div>';
+          }
+          setStatus(`清理完成：推文 ${r.deleted_tweets} 条，动作 ${r.deleted_actions} 条，AI 日志 ${r.deleted_ai_logs} 条`, "ok");
+        } catch (e) { setStatus(`清理失败: ${e.message}`, "bad"); }
+      });
+
+      document.getElementById("backfill-ai-btn").addEventListener("click", async () => {
+        setStatus("正在补跑未评分推文的 AI 处理...");
+        try {
+          const r = await fetchJson("/admin/tweets/backfill-ai", {
+            method: "POST",
+            body: JSON.stringify({ account_id: accountFilter.value || null }),
+          });
+          await loadTweets();
+          if (state.selectedTweetId) {
+            const existing = filteredTweets().find(t => t.id === state.selectedTweetId);
+            if (existing) await loadTweetDetail(state.selectedTweetId);
+          }
+          setStatus(`补跑完成：候选 ${r.candidate_tweets} 条，成功 ${r.scored_tweets} 条，失败 ${r.failed_tweets} 条`, "ok");
+        } catch (e) { setStatus(`补跑失败: ${e.message}`, "bad"); }
+      });
+
+      Promise.all([loadAccounts(), loadTweets()])
+        .then(() => setStatus("推文工作台已就绪", "ok"))
+        .catch(e => setStatus(`初始化失败: ${e.message}`, "bad"));
+
+      window.setInterval(() => { loadTweets().catch(() => {}); }, 30000);
+    </script>
+  </body>
+</html>
