@@ -6,31 +6,30 @@
     <title>OptMonster · 账号总览</title>
     <link rel="stylesheet" href="/ui/theme.css" />
     <style>
-      /* ── Page-specific layout ── */
       .layout-accounts {
         display: grid;
-        grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
-        gap: 20px;
+        grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
+        gap: 18px;
         align-items: start;
       }
 
-      /* Global toggles panel */
+      /* Global toggles */
       .global-toggles {
         display: flex;
         flex-wrap: wrap;
-        gap: 12px 24px;
+        gap: 10px 20px;
         align-items: center;
-        padding: 14px 20px;
-        background: var(--bg-elevated);
+        padding: 12px 16px;
+        background: var(--bg-surface);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        margin-bottom: 20px;
+        margin-bottom: 18px;
       }
       .global-toggles .toggle-label {
-        font-size: 12px;
+        font-size: 11.5px;
         font-weight: 500;
         color: var(--text-secondary);
-        margin-right: 4px;
+        margin-right: 2px;
       }
       .global-toggles .save-row {
         margin-left: auto;
@@ -41,113 +40,85 @@
 
       /* Account card */
       .account-card {
-        background: var(--bg-surface);
+        background: var(--bg-elevated);
         border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: 18px 20px;
-        transition: border-color var(--transition), box-shadow var(--transition);
+        border-radius: var(--radius-md);
+        padding: 14px 16px;
+        transition: border-color var(--transition);
       }
-      .account-card:hover {
-        border-color: var(--border-medium);
-        box-shadow: var(--shadow-sm);
-      }
+      .account-card:hover { border-color: var(--border-medium); }
 
       .account-card-head {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 8px;
         align-items: flex-start;
         justify-content: space-between;
       }
 
       .account-name {
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 600;
         color: var(--text);
         letter-spacing: -0.02em;
       }
-
       .account-meta {
-        font-size: 12px;
+        font-size: 11.5px;
         color: var(--text-muted);
-        margin-top: 2px;
+        margin-top: 1px;
       }
 
       .account-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
+        gap: 5px;
         align-items: center;
       }
+      .account-actions a.chip { cursor: pointer; text-decoration: none; }
+      .account-actions button { padding: 4px 10px; font-size: 11.5px; }
 
-      .account-actions a.chip {
-        cursor: pointer;
-        text-decoration: none;
-      }
-
-      .account-actions button {
-        padding: 6px 12px;
-        font-size: 12px;
-      }
-
-      /* Operation log row */
+      /* Op log */
       .op-row {
         display: flex;
         align-items: flex-start;
-        gap: 12px;
-        padding: 12px 0;
+        gap: 10px;
+        padding: 10px 0;
         border-bottom: 1px solid var(--border);
       }
       .op-row:last-child { border-bottom: none; }
       .op-dot {
-        width: 8px;
-        height: 8px;
+        width: 7px; height: 7px;
         border-radius: 50%;
         background: var(--bg-overlay);
         flex-shrink: 0;
-        margin-top: 5px;
+        margin-top: 4px;
       }
-      .op-dot.ok { background: var(--ok); }
+      .op-dot.ok   { background: var(--ok); }
       .op-dot.warn { background: var(--warn); }
-      .op-dot.bad { background: var(--bad); }
-      .op-content { flex: 1; min-width: 0; }
-      .op-title {
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--text);
-      }
-      .op-detail {
-        font-size: 11.5px;
-        color: var(--text-secondary);
-        margin-top: 2px;
-      }
-      .op-time {
-        font-size: 11px;
-        color: var(--text-muted);
-        white-space: nowrap;
-        flex-shrink: 0;
-        padding-top: 2px;
-      }
+      .op-dot.bad  { background: var(--bad); }
+      .op-content  { flex: 1; min-width: 0; }
+      .op-title    { font-size: 12.5px; font-weight: 500; color: var(--text); }
+      .op-detail   { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+      .op-time     { font-size: 11px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; padding-top: 1px; }
 
-      /* Import section */
+      /* Import preview */
       .import-preview {
-        margin-top: 12px;
-        padding: 12px 14px;
+        margin-top: 10px;
+        padding: 10px 12px;
         background: var(--bg-elevated);
         border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        font-size: 12.5px;
+        border-radius: var(--radius-sm);
+        font-size: 12px;
         color: var(--text-secondary);
-        min-height: 48px;
+        min-height: 42px;
       }
 
-      /* Runtime info ribbon */
       .runtime-ribbon {
-        font-size: 11.5px;
+        font-size: 11px;
         color: var(--text-muted);
         line-height: 1.7;
       }
-      .runtime-ribbon a { font-size: 11.5px; }
+      .runtime-ribbon a { font-size: 11px; }
 
       @media (max-width: 1100px) {
         .layout-accounts { grid-template-columns: 1fr; }
@@ -155,7 +126,7 @@
     </style>
   </head>
   <body>
-    <!-- Top Nav -->
+    <!-- Nav -->
     <nav class="topnav">
       <span class="topnav-brand">Opt<span>Monster</span></span>
       <div class="topnav-divider"></div>
@@ -165,7 +136,7 @@
       <a href="/console/ai">AI 设置</a>
       <a href="/console/ai/logs">AI 日志</a>
       <div class="topnav-actions">
-        <button id="reload-btn" class="secondary">重载配置</button>
+        <button id="reload-btn" class="ghost">重载配置</button>
         <button id="refresh-btn">刷新</button>
       </div>
     </nav>
@@ -188,18 +159,18 @@
         <span id="status-text">正在初始化...</span>
       </div>
 
-      <!-- Metrics row -->
+      <!-- Metrics -->
       <div id="summary-grid" class="metrics-row"></div>
 
       <!-- Global toggles -->
       <form id="runtime-quick-form" class="global-toggles">
         <span class="toggle-label">全局开关</span>
-        <label class="inline"><input id="quick-ai-enabled" type="checkbox" /> AI 自动评分</label>
+        <label class="inline"><input id="quick-ai-enabled" type="checkbox" /> AI 评分</label>
         <label class="inline"><input id="quick-fetch-replies" type="checkbox" /> 抓回复</label>
         <label class="inline"><input id="quick-fetch-retweets" type="checkbox" /> 抓 RT</label>
         <div class="save-row">
           <span id="runtime-settings" class="runtime-ribbon"></span>
-          <button type="submit" class="secondary">保存开关</button>
+          <button type="submit" class="ghost">保存开关</button>
         </div>
       </form>
 
@@ -213,73 +184,16 @@
                 <p class="card-eyebrow">Accounts</p>
                 <p class="card-title">账号列表</p>
               </div>
+              <button id="import-modal-btn" class="secondary" style="padding:5px 12px; font-size:12px;">+ 导入账号</button>
             </div>
-            <div class="card-body" style="padding: 12px 16px;">
-              <div id="accounts-list" style="display:grid; gap:12px;"></div>
+            <div class="card-body" style="padding: 10px 14px;">
+              <div id="accounts-list" style="display:grid; gap:10px;"></div>
             </div>
           </div>
         </div>
 
-        <!-- Right: sidebar panels -->
-        <div style="display:grid; gap:20px;">
-          <!-- Cookie import -->
-          <div class="card">
-            <div class="card-header">
-              <div class="card-title-group">
-                <p class="card-eyebrow">Cookie Import</p>
-                <p class="card-title">导入新账号</p>
-                <p class="card-subtitle">自动识别 Netscape / JSON cookie 文件</p>
-              </div>
-            </div>
-            <div class="card-body">
-              <form id="cookie-import-form">
-                <div class="form-grid">
-                  <div class="field full">
-                    <label for="import-source">Cookie 文件</label>
-                    <select id="import-source">
-                      <option value="">选择根目录里的 cookie 文件</option>
-                    </select>
-                  </div>
-                  <div class="field">
-                    <label for="import-id">账号 id</label>
-                    <input id="import-id" placeholder="自动从文件名生成" />
-                  </div>
-                  <div class="field">
-                    <label for="import-handle">twitter_handle</label>
-                    <input id="import-handle" placeholder="@auto_from_filename" />
-                  </div>
-                  <div class="field">
-                    <label for="import-mode">execution_mode</label>
-                    <select id="import-mode">
-                      <option value="read_only">read_only</option>
-                      <option value="dry_run">dry_run</option>
-                      <option value="live">live</option>
-                    </select>
-                  </div>
-                  <div class="field" style="align-content: end;">
-                    <label class="inline"><input id="import-enabled" type="checkbox" checked /> enabled</label>
-                  </div>
-                  <div class="field full">
-                    <label for="import-extra-yaml">额外 YAML 字段</label>
-                    <textarea id="import-extra-yaml" style="min-height:70px;" placeholder="例如:
-proxy:
-  url: http://127.0.0.1:8080
-targets:
-  search_keywords:
-    - query: agentic ai
-      count: 12"></textarea>
-                  </div>
-                </div>
-                <div id="cookie-import-preview" class="import-preview">选择 cookie 文件后，这里会显示检测结果。</div>
-                <div style="display:flex; gap:8px; margin-top:14px;">
-                  <button type="submit">导入成新账号</button>
-                  <button id="cookie-import-refresh" type="button" class="ghost">刷新候选文件</button>
-                </div>
-              </form>
-            </div>
-          </div>
-
-          <!-- Recent operations -->
+        <!-- Right: operations log -->
+        <div>
           <div class="card">
             <div class="card-header">
               <div class="card-title-group">
@@ -287,13 +201,73 @@ targets:
                 <p class="card-title">最近操作日志</p>
               </div>
             </div>
-            <div class="card-body" style="padding: 0 20px;">
+            <div class="card-body" style="padding: 0 16px;">
               <div id="operations-list"></div>
             </div>
           </div>
         </div>
       </div>
     </main>
+
+    <!-- ── Import Account Modal ── -->
+    <div class="modal-backdrop" id="import-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title">导入新账号</div>
+            <div class="modal-subtitle">自动识别 Netscape / JSON cookie 文件</div>
+          </div>
+          <button class="modal-close" data-close-modal="import-modal">✕</button>
+        </div>
+        <div class="modal-body">
+          <form id="cookie-import-form">
+            <div class="form-grid">
+              <div class="field full">
+                <label for="import-source">Cookie 文件</label>
+                <select id="import-source">
+                  <option value="">选择根目录里的 cookie 文件</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="import-id">账号 id</label>
+                <input id="import-id" placeholder="自动从文件名生成" />
+              </div>
+              <div class="field">
+                <label for="import-handle">twitter_handle</label>
+                <input id="import-handle" placeholder="@auto_from_filename" />
+              </div>
+              <div class="field">
+                <label for="import-mode">execution_mode</label>
+                <select id="import-mode">
+                  <option value="read_only">read_only</option>
+                  <option value="dry_run">dry_run</option>
+                  <option value="live">live</option>
+                </select>
+              </div>
+              <div class="field" style="align-content: end;">
+                <label class="inline"><input id="import-enabled" type="checkbox" checked /> enabled</label>
+              </div>
+              <div class="field full">
+                <label for="import-extra-yaml">额外 YAML 字段（可选）</label>
+                <textarea id="import-extra-yaml" style="min-height:64px;" placeholder="例如:
+proxy:
+  url: http://127.0.0.1:8080
+targets:
+  search_keywords:
+    - query: agentic ai
+      count: 12"></textarea>
+              </div>
+            </div>
+            <div id="cookie-import-preview" class="import-preview">选择 cookie 文件后，这里会显示检测结果。</div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" form="cookie-import-form">导入成新账号</button>
+          <button id="cookie-import-refresh" type="button" class="ghost">刷新候选文件</button>
+          <button type="button" class="ghost" data-close-modal="import-modal" style="margin-left:auto;">取消</button>
+        </div>
+      </div>
+    </div>
 
     <script>
       const state = {
@@ -303,23 +277,45 @@ targets:
         countdownTimer: null,
       };
 
-      const accountsList    = document.getElementById("accounts-list");
-      const operationsList  = document.getElementById("operations-list");
-      const statusText      = document.getElementById("status-text");
-      const statusBar       = document.getElementById("status-bar");
-      const summaryGrid     = document.getElementById("summary-grid");
-      const runtimeSettingsEl = document.getElementById("runtime-settings");
-      const importSource    = document.getElementById("import-source");
-      const importId        = document.getElementById("import-id");
-      const importHandle    = document.getElementById("import-handle");
-      const importMode      = document.getElementById("import-mode");
-      const importEnabled   = document.getElementById("import-enabled");
-      const importExtraYaml = document.getElementById("import-extra-yaml");
+      const accountsList       = document.getElementById("accounts-list");
+      const operationsList     = document.getElementById("operations-list");
+      const statusText         = document.getElementById("status-text");
+      const statusBar          = document.getElementById("status-bar");
+      const summaryGrid        = document.getElementById("summary-grid");
+      const runtimeSettingsEl  = document.getElementById("runtime-settings");
+      const importSource       = document.getElementById("import-source");
+      const importId           = document.getElementById("import-id");
+      const importHandle       = document.getElementById("import-handle");
+      const importMode         = document.getElementById("import-mode");
+      const importEnabled      = document.getElementById("import-enabled");
+      const importExtraYaml    = document.getElementById("import-extra-yaml");
       const cookieImportPreview = document.getElementById("cookie-import-preview");
-      const quickAiEnabled      = document.getElementById("quick-ai-enabled");
-      const quickFetchReplies   = document.getElementById("quick-fetch-replies");
-      const quickFetchRetweets  = document.getElementById("quick-fetch-retweets");
+      const quickAiEnabled     = document.getElementById("quick-ai-enabled");
+      const quickFetchReplies  = document.getElementById("quick-fetch-replies");
+      const quickFetchRetweets = document.getElementById("quick-fetch-retweets");
 
+      // ── Modal helpers ──────────────────────────
+      function openModal(id) {
+        document.getElementById(id).classList.add("open");
+      }
+      function closeModal(id) {
+        document.getElementById(id).classList.remove("open");
+      }
+
+      document.querySelectorAll("[data-close-modal]").forEach(btn => {
+        btn.addEventListener("click", () => closeModal(btn.dataset.closeModal));
+      });
+      document.querySelectorAll(".modal-backdrop").forEach(backdrop => {
+        backdrop.addEventListener("click", e => {
+          if (e.target === backdrop) backdrop.classList.remove("open");
+        });
+      });
+      document.addEventListener("keydown", e => {
+        if (e.key === "Escape")
+          document.querySelectorAll(".modal-backdrop.open").forEach(m => m.classList.remove("open"));
+      });
+
+      // ── Utils ──────────────────────────────────
       function escapeHtml(v) {
         return String(v ?? "")
           .replaceAll("&","&amp;").replaceAll("<","&lt;")
@@ -357,18 +353,12 @@ targets:
         return parts.join(" ");
       }
 
-      function parseLinePairs(text, keyName) {
-        return text.split("\n").map(l => l.trim()).filter(Boolean).map(l => {
-          const [k, c] = l.split(",");
-          return { [keyName]: k.trim(), count: c ? Number(c.trim()) : 20 };
-        });
-      }
-
       function setStatus(message, level = "") {
         statusText.textContent = message;
         statusBar.className = "status-bar" + (level ? " " + level : "");
       }
 
+      // ── Render helpers ─────────────────────────
       function renderSummary(summary) {
         const items = [
           ["账号总数",  summary.total_accounts],
@@ -425,7 +415,7 @@ targets:
             <span class="chip ${candidate.has_ct0 ? "ok" : "warn"}">ct0: ${candidate.has_ct0 ? "✓" : "✗"}</span>
             ${candidate.warnings.length ? `<span class="chip bad">⚠ ${escapeHtml(candidate.warnings.join(", "))}</span>` : '<span class="chip ok">无警告</span>'}
           </div>
-          <p style="font-size:11.5px; color:var(--text-muted); margin-top:8px;">
+          <p style="font-size:11px; color:var(--text-muted); margin-top:7px;">
             建议 id: ${escapeHtml(candidate.suggested_account_id)} · handle: ${escapeHtml(candidate.suggested_twitter_handle)} · 域名: ${escapeHtml((candidate.detected_domains || []).join(", ") || "n/a")}
           </p>
         `;
@@ -447,14 +437,12 @@ targets:
 
       function renderFollowerSparkline(history) {
         if (!history || !history.length) {
-          return '<p style="font-size:11.5px; color:var(--text-muted); margin-top:8px;">暂无粉丝历史</p>';
+          return '<p style="font-size:11px; color:var(--text-muted); margin-top:6px;">暂无粉丝历史</p>';
         }
         if (history.length === 1) {
-          return `<p style="font-size:11.5px; color:var(--text-muted); margin-top:8px;">
-            1个采样: ${escapeHtml(history[0].snapshot_date)} · ${escapeHtml(history[0].follower_count)}
-          </p>`;
+          return `<p style="font-size:11px; color:var(--text-muted); margin-top:6px;">1个采样: ${escapeHtml(history[0].snapshot_date)} · ${escapeHtml(history[0].follower_count)}</p>`;
         }
-        const W = 300, H = 52, P = 5;
+        const W = 300, H = 48, P = 4;
         const counts = history.map(h => h.follower_count);
         const min = Math.min(...counts), max = Math.max(...counts);
         const span = Math.max(max - min, 1);
@@ -465,14 +453,14 @@ targets:
           return `${x.toFixed(1)},${y.toFixed(1)}`;
         }).join(" ");
         return `
-          <svg class="sparkline-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+          <svg class="sparkline-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:48px;">
             <defs>
               <linearGradient id="sg" x1="0" y1="0" x2="1" y2="0">
                 <stop offset="0%" stop-color="#6c8cff"/>
                 <stop offset="100%" stop-color="#34d399"/>
               </linearGradient>
             </defs>
-            <polyline fill="none" stroke="url(#sg)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" points="${points}"></polyline>
+            <polyline fill="none" stroke="url(#sg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${points}"></polyline>
           </svg>
           <p style="font-size:11px; color:var(--text-muted);">${escapeHtml(history[0].snapshot_date)} → ${escapeHtml(history[history.length-1].snapshot_date)}</p>
         `;
@@ -497,9 +485,9 @@ targets:
               </div>
               <div class="account-actions">
                 <a class="chip accent" href="/console/accounts/${encodeURIComponent(account.id)}">详情 →</a>
-                <button class="ghost" style="padding:5px 10px; font-size:11.5px;" data-validate-account="${escapeHtml(account.id)}">校验</button>
-                <button class="secondary" style="padding:5px 10px; font-size:11.5px;" data-fetch-account="${escapeHtml(account.id)}" ${disabledRuntime ? "disabled" : ""}>抓取</button>
-                <button class="${account.lifecycle_status === "enabled" ? "ghost" : "secondary"}" style="padding:5px 10px; font-size:11.5px;"
+                <button class="ghost" data-validate-account="${escapeHtml(account.id)}">校验</button>
+                <button class="secondary" data-fetch-account="${escapeHtml(account.id)}" ${disabledRuntime ? "disabled" : ""}>抓取</button>
+                <button class="${account.lifecycle_status === "enabled" ? "ghost" : "secondary"}"
                   data-toggle-account="${escapeHtml(account.id)}"
                   data-next-state="${account.lifecycle_status === "enabled" ? "disable" : "enable"}">
                   ${account.lifecycle_status === "enabled" ? "停用" : "启用"}
@@ -507,7 +495,6 @@ targets:
               </div>
             </div>
 
-            <!-- Status chips -->
             <div class="chip-row">
               <span class="chip ${chipClass(account.lifecycle_status)}">${escapeHtml(account.lifecycle_status)}</span>
               <span class="chip">mode: ${escapeHtml(account.execution_mode)}</span>
@@ -516,35 +503,15 @@ targets:
               ${account.pause_reason && account.pause_reason !== "none" ? `<span class="chip ${chipClass(account.pause_reason)}">pause: ${escapeHtml(account.pause_reason)}</span>` : ""}
             </div>
 
-            <!-- Stats -->
             <div class="stat-grid">
-              <div class="stat-pill">
-                <div class="label">推文数</div>
-                <div class="value">${escapeHtml(account.tweet_count)}</div>
-              </div>
-              <div class="stat-pill">
-                <div class="label">粉丝数</div>
-                <div class="value">${escapeHtml(followerCount)}</div>
-              </div>
-              <div class="stat-pill">
-                <div class="label">粉丝变化</div>
-                <div class="value">${escapeHtml(followerDelta)}</div>
-              </div>
-              <div class="stat-pill">
-                <div class="label">连续失败</div>
-                <div class="value">${escapeHtml(account.failure_streak)}</div>
-              </div>
-              <div class="stat-pill">
-                <div class="label">额度重置</div>
-                <div class="value" data-daily-reset="${account.daily_reset_in_seconds}">${formatDuration(account.daily_reset_in_seconds)}</div>
-              </div>
-              <div class="stat-pill">
-                <div class="label">下次可动作</div>
-                <div class="value" data-next-action="${account.next_action_in_seconds}">${formatDuration(account.next_action_in_seconds)}</div>
-              </div>
+              <div class="stat-pill"><div class="label">推文数</div><div class="value">${escapeHtml(account.tweet_count)}</div></div>
+              <div class="stat-pill"><div class="label">粉丝数</div><div class="value">${escapeHtml(followerCount)}</div></div>
+              <div class="stat-pill"><div class="label">粉丝变化</div><div class="value">${escapeHtml(followerDelta)}</div></div>
+              <div class="stat-pill"><div class="label">连续失败</div><div class="value">${escapeHtml(account.failure_streak)}</div></div>
+              <div class="stat-pill"><div class="label">额度重置</div><div class="value" data-daily-reset="${account.daily_reset_in_seconds}">${formatDuration(account.daily_reset_in_seconds)}</div></div>
+              <div class="stat-pill"><div class="label">下次可动作</div><div class="value" data-next-action="${account.next_action_in_seconds}">${formatDuration(account.next_action_in_seconds)}</div></div>
             </div>
 
-            <!-- Sparkline -->
             <div class="sparkline-wrap">
               <div class="sparkline-header">
                 <span>粉丝变化趋势</span>
@@ -553,14 +520,12 @@ targets:
               ${renderFollowerSparkline(account.follower_history || [])}
             </div>
 
-            <!-- Budget bars -->
-            <div style="margin-top:14px;">
-              <div style="font-size:11px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-muted); margin-bottom:6px;">今日配额</div>
+            <div style="margin-top:12px;">
+              <div style="font-size:10.5px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-muted); margin-bottom:5px;">今日配额</div>
               <div class="budget-list">${barHtml}</div>
             </div>
 
-            <!-- Schedule chips -->
-            <div class="chip-row" style="margin-top:12px;">
+            <div class="chip-row" style="margin-top:10px;">
               <span class="chip">抓取: 每 ${escapeHtml(fetchSchedule.base_interval_minutes || 0)}m ±${escapeHtml(fetchSchedule.interval_jitter_minutes || 0)}m</span>
               <span class="chip">静默: ${escapeHtml(quietHours)}</span>
               <span class="chip">上次抓取: ${escapeHtml(formatDate(account.last_fetch_finished_at))}</span>
@@ -568,8 +533,8 @@ targets:
             </div>
 
             ${account.last_error_message ? `
-              <div style="margin-top:10px; padding:8px 12px; background:var(--bad-dim); border:1px solid rgba(248,113,113,0.2); border-radius:var(--radius-sm);">
-                <span style="font-size:11.5px; color:var(--bad);">⚠ ${escapeHtml(account.last_error_message)}</span>
+              <div style="margin-top:8px; padding:7px 10px; background:var(--bad-dim); border:1px solid rgba(248,113,113,0.2); border-radius:var(--radius-sm);">
+                <span style="font-size:11px; color:var(--bad);">⚠ ${escapeHtml(account.last_error_message)}</span>
               </div>
             ` : ""}
           </div>
@@ -586,7 +551,7 @@ targets:
 
       function renderOperations(operations) {
         if (!operations.length) {
-          operationsList.innerHTML = '<div class="empty-state" style="margin: 16px 0;">暂无运行日志。</div>';
+          operationsList.innerHTML = '<div class="empty-state" style="margin: 14px 0;">暂无运行日志。</div>';
           return;
         }
         operationsList.innerHTML = operations.map(op => `
@@ -595,7 +560,7 @@ targets:
             <div class="op-content">
               <div class="op-title">${escapeHtml(op.account_id)} · ${escapeHtml(op.operation_type)}</div>
               <div class="op-detail">
-                <span class="chip ${chipClass(op.status)}" style="font-size:10.5px; padding:2px 7px;">${escapeHtml(op.status)}</span>
+                <span class="chip ${chipClass(op.status)}" style="font-size:10px; padding:1px 6px;">${escapeHtml(op.status)}</span>
                 ${op.message ? ` ${escapeHtml(op.message)}` : ""}
               </div>
             </div>
@@ -604,6 +569,7 @@ targets:
         `).join("");
       }
 
+      // ── API ────────────────────────────────────
       async function fetchJson(url, options = {}) {
         const response = await fetch(url, {
           headers: { "Content-Type": "application/json" },
@@ -653,20 +619,25 @@ targets:
         }, 1000);
       }
 
-      // Events
+      // ── Event handlers ─────────────────────────
       document.getElementById("refresh-btn").addEventListener("click", async () => {
-        setStatus("正在刷新...", "");
-        try { await loadDashboard(); setStatus("已刷新", "ok"); } catch (e) { setStatus(`刷新失败: ${e.message}`, "bad"); }
+        setStatus("正在刷新...");
+        try { await loadDashboard(); setStatus("已刷新", "ok"); }
+        catch (e) { setStatus(`刷新失败: ${e.message}`, "bad"); }
       });
 
       document.getElementById("reload-btn").addEventListener("click", async () => {
-        setStatus("正在热重载配置...", "");
+        setStatus("正在热重载配置...");
         try {
           const r = await fetchJson("/admin/config/reload", { method: "POST" });
           await loadDashboard();
-          await loadCookieCandidates();
           setStatus(`配置已重载 — 新增 ${r.new_accounts} / 更新 ${r.updated_accounts} / 移除 ${r.removed_accounts}`, "ok");
         } catch (e) { setStatus(`重载失败: ${e.message}`, "bad"); }
+      });
+
+      document.getElementById("import-modal-btn").addEventListener("click", async () => {
+        openModal("import-modal");
+        try { await loadCookieCandidates(); } catch {}
       });
 
       importSource.addEventListener("change", () => {
@@ -676,8 +647,9 @@ targets:
       });
 
       document.getElementById("cookie-import-refresh").addEventListener("click", async () => {
-        setStatus("正在刷新候选文件...", "");
-        try { await loadCookieCandidates(); setStatus("候选文件已刷新", "ok"); } catch (e) { setStatus(`刷新失败: ${e.message}`, "bad"); }
+        setStatus("正在刷新候选文件...");
+        try { await loadCookieCandidates(); setStatus("候选文件已刷新", "ok"); }
+        catch (e) { setStatus(`刷新失败: ${e.message}`, "bad"); }
       });
 
       accountsList.addEventListener("click", async (event) => {
@@ -688,17 +660,17 @@ targets:
         const toggleId   = target.dataset.toggleAccount;
         try {
           if (validateId) {
-            setStatus(`正在校验 ${validateId} 会话...`, "");
+            setStatus(`正在校验 ${validateId} 会话...`);
             const r = await fetchJson(`/admin/accounts/${encodeURIComponent(validateId)}/validate-session`, { method: "POST" });
             await loadDashboard();
             setStatus(`${validateId}: ${r.ok ? "会话有效" : r.detail || "校验失败"}`, r.ok ? "ok" : "bad");
           } else if (fetchId) {
-            setStatus(`正在为 ${fetchId} 入队抓取...`, "");
+            setStatus(`正在为 ${fetchId} 入队抓取...`);
             const r = await fetchJson(`/admin/accounts/${encodeURIComponent(fetchId)}/fetch-now`, { method: "POST" });
             setStatus(`${fetchId}: ${r.enqueued ? "已入队" : r.detail || "未入队"}`, r.enqueued ? "ok" : "warn");
           } else if (toggleId) {
             const nextState = target.dataset.nextState;
-            setStatus(`正在${nextState === "disable" ? "停用" : "启用"} ${toggleId}...`, "");
+            setStatus(`正在${nextState === "disable" ? "停用" : "启用"} ${toggleId}...`);
             await fetchJson(`/admin/accounts/${encodeURIComponent(toggleId)}/${nextState}`, { method: "POST" });
             await loadDashboard();
             setStatus(`${toggleId} 已${nextState === "disable" ? "停用" : "启用"}`, "ok");
@@ -710,7 +682,7 @@ targets:
         event.preventDefault();
         const s = state.dashboard?.runtime_settings;
         if (!s) { setStatus("全局设置还没加载完成", "warn"); return; }
-        setStatus("正在保存全局开关...", "");
+        setStatus("正在保存全局开关...");
         try {
           const r = await fetchJson("/admin/runtime-settings", {
             method: "PUT",
@@ -746,18 +718,18 @@ targets:
           execution_mode: importMode.value,
           extra_yaml: importExtraYaml.value.trim() || null,
         };
-        setStatus(`正在从 ${payload.source_file} 导入新账号...`, "");
+        setStatus(`正在从 ${payload.source_file} 导入新账号...`);
         try {
           const r = await fetchJson("/admin/cookie-import/accounts", { method: "POST", body: JSON.stringify(payload) });
           await loadDashboard();
-          await loadCookieCandidates();
           document.getElementById("cookie-import-form").reset();
           renderCookiePreview(null);
+          closeModal("import-modal");
           setStatus(`${r.account.account.id} 已导入，会话校验: ${r.validation_ok ? "可用" : r.validation_detail || "失败"}`, r.validation_ok ? "ok" : "warn");
         } catch (e) { setStatus(`导入失败: ${e.message}`, "bad"); }
       });
 
-      Promise.all([loadDashboard(), loadCookieCandidates()])
+      loadDashboard()
         .then(() => setStatus("控制台已就绪", "ok"))
         .catch(e => setStatus(`初始化失败: ${e.message}`, "bad"));
 
