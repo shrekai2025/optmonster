@@ -87,6 +87,38 @@ class TwikitDataSource(TwitterDataSource):
         finally:
             await self._close_client(client)
 
+    async def fetch_for_you_timeline(
+        self,
+        account: AccountConfig,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> FetchBatchResult:
+        client = self._build_client(account)
+        try:
+            result = await client.get_timeline(count=limit, cursor=cursor)
+            return self._normalize_result(result)
+        except Exception as exc:
+            raise classify_exception(exc) from exc
+        finally:
+            await self._close_client(client)
+
+    async def fetch_popular_timeline(
+        self,
+        account: AccountConfig,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> FetchBatchResult:
+        client = self._build_client(account)
+        try:
+            result = await client.get_timeline(count=limit, cursor=cursor)
+            return self._normalize_result(result)
+        except Exception as exc:
+            raise classify_exception(exc) from exc
+        finally:
+            await self._close_client(client)
+
     async def search_recent(
         self,
         account: AccountConfig,
@@ -151,9 +183,21 @@ class TwikitDataSource(TwitterDataSource):
             lang=getattr(tweet, "lang", None),
             is_reply=self._is_reply(tweet, raw_payload),
             is_retweet=self._is_retweet(tweet, raw_payload),
+            view_count=self._normalize_metric(getattr(tweet, "view_count", None)),
+            like_count=self._normalize_metric(getattr(tweet, "favorite_count", None)),
+            retweet_count=self._normalize_metric(getattr(tweet, "retweet_count", None)),
+            reply_count=self._normalize_metric(getattr(tweet, "reply_count", None)),
             created_at=created_at,
             raw_payload=raw_payload,
         )
+
+    def _normalize_metric(self, value: Any) -> int | None:
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
 
     def _is_reply(self, tweet: Any, raw_payload: dict[str, Any] | None) -> bool:
         for attr in (

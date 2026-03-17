@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OptMonster · AI 设置</title>
-    <link rel="stylesheet" href="/ui/theme.css" />
+    <link rel="stylesheet" href="/ui/theme.css?v=20260316b" />
     <style>
       .layout-ai {
         width: min(1000px, 100%);
@@ -39,14 +39,46 @@
         display: flex;
         align-items: flex-start;
         gap: 10px;
-        padding: 10px 0;
+        padding: 12px;
         border-bottom: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        transition: background var(--transition), border-color var(--transition), box-shadow var(--transition);
       }
       .checkbox-field:last-child { border-bottom: none; }
+      .checkbox-field:hover {
+        background: var(--bg-overlay);
+      }
 
       .checkbox-field input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
         margin-top: 1px;
         flex-shrink: 0;
+        border-radius: 5px;
+        border: 1.5px solid var(--border-strong);
+        background: var(--bg-base);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03);
+        transition: background-color var(--transition), border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+      }
+      .checkbox-field input[type="checkbox"]:checked {
+        background-color: var(--accent);
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(108,140,255,0.16);
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='10' viewBox='0 0 12 10'%3E%3Cpath d='M1 5.2 4.2 8.4 11 1.6' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: center;
+        background-size: 12px 10px;
+      }
+      .checkbox-field input[type="checkbox"]:focus-visible {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(108,140,255,0.16);
+        transform: translateY(-1px);
+      }
+      .checkbox-field input[type="checkbox"]:checked + .checkbox-field-content .checkbox-field-label {
+        color: var(--accent-hover);
+      }
+      .checkbox-field input[type="checkbox"]:checked + .checkbox-field-content .checkbox-field-help {
+        color: var(--text);
       }
 
       .checkbox-field-content {
@@ -162,6 +194,7 @@
       <span class="topnav-brand">Opt<span>Monster</span></span>
       <div class="topnav-divider"></div>
       <a href="/console">账号总览</a>
+      <a href="/console/groups">账号分组</a>
       <a href="/console/tweets">推文工作台</a>
       <a href="/console/replies">回复处理</a>
       <a href="/console/ai" class="active">AI 设置</a>
@@ -251,6 +284,26 @@
                       <span style="font-size:11.5px; color:var(--text-muted);">只保留最近多少小时内的推文；填 0 表示不限制。</span>
                     </div>
                     <div class="field">
+                      <label for="runtime-popular-min-views">POPULAR_TWEET_MIN_VIEWS</label>
+                      <input id="runtime-popular-min-views" type="number" min="0" step="1000" />
+                      <span style="font-size:11.5px; color:var(--text-muted);">热门推文最少阅读量。设为 0 表示不校验。</span>
+                    </div>
+                    <div class="field">
+                      <label for="runtime-popular-min-likes">POPULAR_TWEET_MIN_LIKES</label>
+                      <input id="runtime-popular-min-likes" type="number" min="0" />
+                      <span style="font-size:11.5px; color:var(--text-muted);">热门推文最少点赞数。设为 0 表示不校验。</span>
+                    </div>
+                    <div class="field">
+                      <label for="runtime-popular-min-retweets">POPULAR_TWEET_MIN_RETWEETS</label>
+                      <input id="runtime-popular-min-retweets" type="number" min="0" />
+                      <span style="font-size:11.5px; color:var(--text-muted);">热门推文最少转推数。设为 0 表示不校验。</span>
+                    </div>
+                    <div class="field">
+                      <label for="runtime-popular-min-replies">POPULAR_TWEET_MIN_REPLIES</label>
+                      <input id="runtime-popular-min-replies" type="number" min="0" />
+                      <span style="font-size:11.5px; color:var(--text-muted);">热门推文最少评论数。设为 0 表示不校验。</span>
+                    </div>
+                    <div class="field">
                       <label for="runtime-llm-provider">LLM_PROVIDER</label>
                       <select id="runtime-llm-provider">
                         <option value="mock">mock</option>
@@ -269,10 +322,9 @@
                     <div class="field full">
                       <label for="runtime-llm-api-key">LLM_API_KEY</label>
                       <input id="runtime-llm-api-key" type="password" placeholder="留空则保持现有 key" />
-                      <label class="inline" style="margin-top:4px;">
-                        <input id="runtime-llm-replace-key" type="checkbox" />
-                        替换当前 API key（不勾选则保持现有值）
-                      </label>
+                      <span class="field-help" style="display:block; margin-top:8px;">
+                        输入新 key 会直接覆盖当前值；留空则保持现有 key。
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -395,11 +447,14 @@
       const runtimeFetchLatestFirst    = document.getElementById("runtime-fetch-latest-first");
       const runtimeFetchIncludeReplies = document.getElementById("runtime-fetch-include-replies");
       const runtimeFetchIncludeRetweets = document.getElementById("runtime-fetch-include-retweets");
+      const runtimePopularMinViews = document.getElementById("runtime-popular-min-views");
+      const runtimePopularMinLikes = document.getElementById("runtime-popular-min-likes");
+      const runtimePopularMinRetweets = document.getElementById("runtime-popular-min-retweets");
+      const runtimePopularMinReplies = document.getElementById("runtime-popular-min-replies");
       const runtimeProvider   = document.getElementById("runtime-llm-provider");
       const runtimeBaseUrl    = document.getElementById("runtime-llm-base-url");
       const runtimeModel      = document.getElementById("runtime-llm-model");
       const runtimeApiKey     = document.getElementById("runtime-llm-api-key");
-      const runtimeReplaceKey = document.getElementById("runtime-llm-replace-key");
       const promptTestOutput  = document.getElementById("prompt-test-output");
       const promptTestError   = document.getElementById("prompt-test-error");
       const promptConfigFile  = document.getElementById("prompt-config-file");
@@ -415,6 +470,10 @@
 
       function escapeHtml(v) {
         return String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
+      }
+
+      function formatMetricThreshold(v) {
+        return Number(v || 0).toLocaleString("en-US");
       }
 
       async function fetchJson(url, options = {}) {
@@ -434,6 +493,7 @@
           { label: "Window",    value: `最近 ${s.fetch_recent_window_hours}h` },
           { label: "Replies",   value: s.fetch_include_replies ? "抓" : "跳过" },
           { label: "Retweets",  value: s.fetch_include_retweets ? "抓" : "跳过" },
+          { label: "Hot",       value: `${formatMetricThreshold(s.popular_tweet_min_views)}v / ${formatMetricThreshold(s.popular_tweet_min_likes)}l / ${formatMetricThreshold(s.popular_tweet_min_retweets)}rt / ${formatMetricThreshold(s.popular_tweet_min_replies)}rp` },
           { label: "Provider",  value: s.llm_provider },
           { label: "Model",     value: s.llm_model_id || "n/a" },
           { label: "Key",       value: s.llm_api_key_masked || "not set" },
@@ -450,11 +510,14 @@
         runtimeFetchLatestFirst.checked         = Boolean(s.fetch_latest_first);
         runtimeFetchIncludeReplies.checked      = Boolean(s.fetch_include_replies);
         runtimeFetchIncludeRetweets.checked     = Boolean(s.fetch_include_retweets);
+        runtimePopularMinViews.value            = s.popular_tweet_min_views;
+        runtimePopularMinLikes.value            = s.popular_tweet_min_likes;
+        runtimePopularMinRetweets.value         = s.popular_tweet_min_retweets;
+        runtimePopularMinReplies.value          = s.popular_tweet_min_replies;
         runtimeProvider.value                   = s.llm_provider;
         runtimeBaseUrl.value                    = s.llm_base_url || "";
         runtimeModel.value                      = s.llm_model_id || "";
         runtimeApiKey.value                     = "";
-        runtimeReplaceKey.checked               = false;
       }
 
       async function loadRuntimeSettings() {
@@ -494,6 +557,7 @@
         event.preventDefault();
         setStatus("正在保存全局设置...");
         try {
+          const nextApiKey = runtimeApiKey.value.trim();
           const r = await fetchJson("/admin/runtime-settings", {
             method: "PUT",
             body: JSON.stringify({
@@ -502,11 +566,15 @@
               fetch_latest_first: runtimeFetchLatestFirst.checked,
               fetch_include_replies: runtimeFetchIncludeReplies.checked,
               fetch_include_retweets: runtimeFetchIncludeRetweets.checked,
+              popular_tweet_min_views: Number(runtimePopularMinViews.value || 0),
+              popular_tweet_min_likes: Number(runtimePopularMinLikes.value || 0),
+              popular_tweet_min_retweets: Number(runtimePopularMinRetweets.value || 0),
+              popular_tweet_min_replies: Number(runtimePopularMinReplies.value || 0),
               llm_provider: runtimeProvider.value,
               llm_base_url: runtimeBaseUrl.value.trim() || null,
               llm_model_id: runtimeModel.value.trim() || null,
-              llm_api_key: runtimeApiKey.value.trim() || null,
-              replace_api_key: runtimeReplaceKey.checked,
+              llm_api_key: nextApiKey || null,
+              replace_api_key: false,
             }),
           });
           renderRuntimeSettings(r.runtime_settings);

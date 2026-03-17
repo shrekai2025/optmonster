@@ -45,6 +45,14 @@ Twitter 账号底座 v1/2，现阶段覆盖：
 环境文件支持第三方 LLM Provider 的全局配置：
 
 - `APP_TIMEZONE`
+- `FETCH_RECENT_WINDOW_HOURS`
+- `FETCH_LATEST_FIRST`
+- `FETCH_INCLUDE_REPLIES`
+- `FETCH_INCLUDE_RETWEETS`
+- `POPULAR_TWEET_MIN_VIEWS`
+- `POPULAR_TWEET_MIN_LIKES`
+- `POPULAR_TWEET_MIN_RETWEETS`
+- `POPULAR_TWEET_MIN_REPLIES`
 - `LLM_PROVIDER`
   - `mock`
   - `openai_compatible`
@@ -84,6 +92,7 @@ Twitter 账号底座 v1/2，现阶段覆盖：
 10. 页面里直接编辑账号配置并保存
    - `GET /admin/accounts/{account_id}/config`
    - `PUT /admin/accounts/{account_id}/config`
+   - 可启用 `targets.timeline (Following)`、`targets.timeline_recommended (For You)`、`targets.timeline_popular (Hot / Viral)`
 11. 页面里从项目根目录导入 cookie 文件生成新账号
    - 控制台会扫描根目录里的 Netscape / JSON cookie 文件
    - 自动提取 `x.com / twitter.com` 登录 cookie，写入 `config/cookies/*.json`

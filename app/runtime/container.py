@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from app.accounts.loader import AccountConfigLoader
+from app.accounts.loader import AccountConfigLoader, AccountGroupConfigLoader
 from app.accounts.registry import AccountRegistry
 from app.accounts.service import AccountService
 from app.actions.executor import TwikitActionExecutor, TwitterActionExecutor
@@ -53,7 +53,10 @@ async def build_container(
         config_dir=settings.resolve_path(settings.config_dir),
         default_cookie_dir=settings.resolve_path(settings.cookie_dir),
     )
-    registry = AccountRegistry(loader)
+    group_loader = AccountGroupConfigLoader(
+        config_dir=settings.resolve_path(settings.group_config_dir),
+    )
+    registry = AccountRegistry(loader, group_loader=group_loader)
     coordinator = RuntimeCoordinator(runtime_redis, settings)
     source_factory = datasource_factory or DataSourceFactory(settings)
     runtime_llm_service = llm_service or LLMService(

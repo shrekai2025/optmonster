@@ -32,6 +32,10 @@ class RuntimeCoordinator:
             return True
         return False
 
+    async def list_fetch_queue(self) -> list[str]:
+        items = await self.redis.lrange(self.queue_key, 0, -1)
+        return [str(item) for item in items]
+
     async def dequeue_fetch(self, block_timeout: int = 1) -> str | None:
         item = await self.redis.blpop(self.queue_key, timeout=block_timeout)
         if item is None:

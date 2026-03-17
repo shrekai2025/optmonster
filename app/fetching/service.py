@@ -21,6 +21,7 @@ from app.fetching.schemas import FetchBatchResult, FetchRunResponse, SessionVali
 from app.runtime.enums import (
     AccountLifecycleStatus,
     CookieFreshness,
+    ExecutionMode,
     FetchErrorCode,
     OperationStatus,
     OperationType,
@@ -294,7 +295,7 @@ class FetchService:
             source,
             cursor=cursor_value,
         )
-        result, filter_counts = self._apply_fetch_content_filters(result)
+        result, filter_counts = self._apply_fetch_content_filters(source, result)
         await self._record_fetch_filter_log(
             account_id=account.id,
             source=source,
@@ -330,6 +331,7 @@ class FetchService:
         total_filter_counts = {
             "reply_filtered": 0,
             "retweet_filtered": 0,
+            "popular_filtered": 0,
         }
 
         while len(collected_items) < source.limit:
@@ -337,9 +339,10 @@ class FetchService:
             final_next_cursor = result.next_cursor
             if not result.items:
                 break
-            filtered_result, filter_counts = self._apply_fetch_content_filters(result)
+            filtered_result, filter_counts = self._apply_fetch_content_filters(source, result)
             total_filter_counts["reply_filtered"] += filter_counts["reply_filtered"]
             total_filter_counts["retweet_filtered"] += filter_counts["retweet_filtered"]
+            total_filter_counts["popular_filtered"] += filter_counts["popular_filtered"]
 
             for item in filtered_result.items:
                 if item.tweet_id in seen_ids:
@@ -391,6 +394,18 @@ class FetchService:
                 cursor=cursor,
                 limit=source.limit,
             )
+        if source.source_type == SourceType.TIMELINE_RECOMMENDED:
+            return await datasource.fetch_for_you_timeline(
+                account,
+                cursor=cursor,
+                limit=source.limit,
+            )
+        if source.source_type == SourceType.TIMELINE_POPULAR:
+            return await datasource.fetch_popular_timeline(
+                account,
+                cursor=cursor,
+                limit=source.limit,
+            )
         if source.source_type == SourceType.WATCH_USER:
             return await datasource.fetch_user_tweets(
                 account,
@@ -438,6 +453,10 @@ class FetchService:
                     author_handle=item.author_handle,
                     text=item.text,
                     lang=item.lang,
+                    view_count=item.view_count,
+                    like_count=item.like_count,
+                    retweet_count=item.retweet_count,
+                    reply_count=item.reply_count,
                     created_at_twitter=item.created_at,
                     fetched_at=item.fetched_at,
                     raw_payload=item.raw_payload,
@@ -455,10 +474,12 @@ class FetchService:
 
     def _apply_fetch_content_filters(
         self,
+        source: FetchSourceConfig,
         batch: FetchBatchResult,
     ) -> tuple[FetchBatchResult, dict[str, int]]:
         reply_filtered = 0
         retweet_filtered = 0
+        popular_filtered = 0
         filtered_items = []
         for item in batch.items:
             if item.is_reply and not self.settings.fetch_include_replies:
@@ -467,14 +488,37 @@ class FetchService:
             if item.is_retweet and not self.settings.fetch_include_retweets:
                 retweet_filtered += 1
                 continue
+            if (
+                source.source_type == SourceType.TIMELINE_POPULAR
+                and not self._tweet_matches_popular_thresholds(item)
+            ):
+                popular_filtered += 1
+                continue
             filtered_items.append(item)
         filter_counts = {
             "reply_filtered": reply_filtered,
             "retweet_filtered": retweet_filtered,
+            "popular_filtered": popular_filtered,
         }
         if len(filtered_items) == len(batch.items):
             return batch, filter_counts
         return FetchBatchResult(items=filtered_items, next_cursor=batch.next_cursor), filter_counts
+
+    def _tweet_matches_popular_thresholds(self, item) -> bool:
+        return (
+            self._metric_at_least(item.view_count, self.settings.popular_tweet_min_views)
+            and self._metric_at_least(item.like_count, self.settings.popular_tweet_min_likes)
+            and self._metric_at_least(
+                item.retweet_count,
+                self.settings.popular_tweet_min_retweets,
+            )
+            and self._metric_at_least(item.reply_count, self.settings.popular_tweet_min_replies)
+        )
+
+    def _metric_at_least(self, value: int | None, minimum: int) -> bool:
+        if minimum <= 0:
+            return True
+        return value is not None and value >= minimum
 
     async def _auto_score_inserted_tweets(
         self,
@@ -498,6 +542,24 @@ class FetchService:
                 },
                 response_payload={
                     "reason": "ai_disabled",
+                    "skipped_count": len(tweet_ids),
+                },
+            )
+            return
+        account = await self.registry.get(account_id)
+        if account is None:
+            return
+        if account.execution_mode == ExecutionMode.READ_ONLY:
+            await self._record_ai_runtime_log(
+                account_id=account_id,
+                log_type="auto_score_skip",
+                status="skipped",
+                request_payload={
+                    "trigger_source": trigger_source,
+                    "tweet_ids": tweet_ids,
+                },
+                response_payload={
+                    "reason": "read_only",
                     "skipped_count": len(tweet_ids),
                 },
             )
@@ -583,6 +645,8 @@ class FetchService:
         for account in accounts:
             state = states.get(account.id)
             if state is None or state.lifecycle_status != AccountLifecycleStatus.ENABLED:
+                continue
+            if account.execution_mode == ExecutionMode.READ_ONLY:
                 continue
 
             async with self.session_factory() as session:
@@ -936,6 +1000,7 @@ class FetchService:
         if (
             filter_counts["reply_filtered"] <= 0
             and filter_counts["retweet_filtered"] <= 0
+            and filter_counts["popular_filtered"] <= 0
         ):
             return
         await self._record_ai_runtime_log(
@@ -949,6 +1014,7 @@ class FetchService:
             response_payload={
                 "reply_filtered": filter_counts["reply_filtered"],
                 "retweet_filtered": filter_counts["retweet_filtered"],
+                "popular_filtered": filter_counts["popular_filtered"],
             },
         )
 

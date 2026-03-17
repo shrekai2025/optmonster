@@ -62,6 +62,8 @@ class FetchErrorCode(StrEnum):
 class SourceType(StrEnum):
     KEYWORD_SEARCH = "keyword_search"
     TIMELINE = "timeline"
+    TIMELINE_POPULAR = "timeline_popular"
+    TIMELINE_RECOMMENDED = "timeline_recommended"
     WATCH_USER = "watch_user"
 
 

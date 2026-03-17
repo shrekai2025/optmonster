@@ -31,11 +31,29 @@ class BrowserFallbackDataSource(TwitterDataSource):
     ) -> FetchBatchResult:
         raise NotImplementedError("browser fallback datasource is not implemented in v1")
 
+    async def fetch_for_you_timeline(
+        self,
+        account: AccountConfig,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> FetchBatchResult:
+        raise NotImplementedError("browser fallback datasource is not implemented in v1")
+
     async def search_recent(
         self,
         account: AccountConfig,
         *,
         query: str,
+        cursor: str | None,
+        limit: int,
+    ) -> FetchBatchResult:
+        raise NotImplementedError("browser fallback datasource is not implemented in v1")
+
+    async def fetch_popular_timeline(
+        self,
+        account: AccountConfig,
+        *,
         cursor: str | None,
         limit: int,
     ) -> FetchBatchResult:

@@ -5,14 +5,22 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.fetching.schemas import FetchBatchResult, NormalizedTweet
 from app.llm.schemas import DecisionResult
 from app.main import create_app
-from app.runtime.enums import AccountLifecycleStatus, PauseReason, SourceType
-from app.runtime.models import AccountFollowerSnapshot, AILogRecord
+from app.runtime.enums import (
+    AccountLifecycleStatus,
+    ActionStatus,
+    ActionType,
+    ExecutionMode,
+    PauseReason,
+    SourceType,
+)
+from app.runtime.models import AccountFollowerSnapshot, AILogRecord, ActionRequest
 from app.runtime.settings import Settings
 
 
@@ -71,6 +79,18 @@ async def test_admin_routes_list_accounts_and_enqueue_fetch(make_test_context) -
             "detail": None,
         }
 
+        dashboard_response = await client.get("/admin/dashboard")
+        assert dashboard_response.status_code == 200
+        fetch_queue = dashboard_response.json()["fetch_queue"]
+        assert fetch_queue == [
+            {
+                "account_id": "acct1",
+                "twitter_handle": "@acct1",
+                "lifecycle_status": "enabled",
+                "position": 1,
+            }
+        ]
+
 
 @pytest.mark.asyncio
 async def test_admin_can_disable_and_enable_account(make_test_context) -> None:
@@ -114,6 +134,32 @@ async def test_admin_can_disable_and_enable_account(make_test_context) -> None:
         enabled_state = await context.get_state("acct1")
         assert enabled_state.lifecycle_status == AccountLifecycleStatus.ENABLED
         assert enabled_state.pause_reason == PauseReason.NONE
+
+
+@pytest.mark.asyncio
+async def test_admin_can_quick_switch_execution_mode(make_test_context) -> None:
+    context = await make_test_context(accounts=[{"id": "acct1", "execution_mode": "read_only"}])
+
+    async def container_factory(_: Settings):
+        return context.container
+
+    app = create_app(context.settings, container_factory=container_factory)
+    app.state.container = context.container
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.put(
+            "/admin/accounts/acct1/execution-mode",
+            json={"execution_mode": "live"},
+        )
+        assert response.status_code == 200
+        assert response.json()["execution_mode"] == "live"
+
+        dashboard_response = await client.get("/admin/dashboard")
+        assert dashboard_response.status_code == 200
+        assert dashboard_response.json()["accounts"][0]["execution_mode"] == "live"
+
+    config_payload = yaml.safe_load((context.config_dir / "acct1.yaml").read_text(encoding="utf-8"))
+    assert config_payload["execution_mode"] == "live"
 
 
 @pytest.mark.asyncio
@@ -292,15 +338,155 @@ async def test_tweet_cleanup_route_removes_stale_and_filtered_tweets(
         )
         assert cleanup_response.status_code == 200
         payload = cleanup_response.json()
-        assert payload["deleted_tweets"] == 3
+        assert payload["deleted_tweets"] == 1
         assert payload["deleted_outside_window_tweets"] == 1
-        assert payload["deleted_filtered_reply_tweets"] == 1
-        assert payload["deleted_filtered_retweet_tweets"] == 1
+        assert payload["deleted_filtered_reply_tweets"] == 0
+        assert payload["deleted_filtered_retweet_tweets"] == 0
 
         tweets_response = await client.get("/admin/tweets", params={"account_id": "acct1"})
         assert tweets_response.status_code == 200
         tweets = tweets_response.json()
-        assert [tweet["tweet_id"] for tweet in tweets] == ["401"]
+        assert {tweet["tweet_id"] for tweet in tweets} == {"401", "403", "404"}
+
+
+@pytest.mark.asyncio
+async def test_tweet_clear_route_deletes_selected_account_tweets(make_test_context) -> None:
+    now = datetime.now(UTC)
+    context = await make_test_context(
+        accounts=[
+            {"id": "acct1", "execution_mode": "dry_run"},
+            {"id": "acct2", "execution_mode": "dry_run"},
+        ],
+        settings_overrides={"ai_enabled": True},
+    )
+    context.fake_source.add_batch(
+        "acct1",
+        SourceType.TIMELINE,
+        "home_following",
+        FetchBatchResult(
+            items=[
+                NormalizedTweet(
+                    tweet_id="501",
+                    author_handle="@openai",
+                    text="Clear only acct1.",
+                    created_at=now,
+                )
+            ],
+            next_cursor=None,
+        ),
+    )
+    context.fake_source.add_batch(
+        "acct2",
+        SourceType.TIMELINE,
+        "home_following",
+        FetchBatchResult(
+            items=[
+                NormalizedTweet(
+                    tweet_id="502",
+                    author_handle="@anthropicai",
+                    text="Keep acct2.",
+                    created_at=now,
+                )
+            ],
+            next_cursor=None,
+        ),
+    )
+    context.fake_llm.set_decision(
+        "acct1",
+        "Clear only acct1.",
+        DecisionResult(
+            relevance_score=8,
+            like=True,
+            reply_draft="Worth a closer look.",
+            reply_confidence=7,
+            rationale="create action records",
+        ),
+    )
+    context.fake_llm.set_decision(
+        "acct2",
+        "Keep acct2.",
+        DecisionResult(
+            relevance_score=6,
+            like=False,
+            reply_draft=None,
+            reply_confidence=1,
+            rationale="score only",
+        ),
+    )
+    assert (await context.container.fetch_service.fetch_account("acct1", trigger="manual")).status == "success"
+    assert (await context.container.fetch_service.fetch_account("acct2", trigger="manual")).status == "success"
+
+    async def container_factory(_: Settings):
+        return context.container
+
+    app = create_app(context.settings, container_factory=container_factory)
+    app.state.container = context.container
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        clear_response = await client.post(
+            "/admin/tweets/clear",
+            json={"account_id": "acct1"},
+        )
+        assert clear_response.status_code == 200
+        payload = clear_response.json()
+        assert payload["deleted_tweets"] == 1
+        assert payload["deleted_actions"] >= 1
+        assert payload["deleted_ai_logs"] >= 1
+
+        acct1_tweets = await client.get("/admin/tweets", params={"account_id": "acct1"})
+        acct2_tweets = await client.get("/admin/tweets", params={"account_id": "acct2"})
+        assert acct1_tweets.status_code == 200
+        assert acct2_tweets.status_code == 200
+        assert acct1_tweets.json() == []
+        assert [tweet["tweet_id"] for tweet in acct2_tweets.json()] == ["502"]
+
+
+@pytest.mark.asyncio
+async def test_tweet_clear_route_deletes_all_tweets(make_test_context) -> None:
+    now = datetime.now(UTC)
+    context = await make_test_context(
+        accounts=[{"id": "acct1"}, {"id": "acct2"}],
+        settings_overrides={"ai_enabled": False},
+    )
+    context.fake_source.add_batch(
+        "acct1",
+        SourceType.TIMELINE,
+        "home_following",
+        FetchBatchResult(
+            items=[NormalizedTweet(tweet_id="601", text="delete all 1", created_at=now)],
+            next_cursor=None,
+        ),
+    )
+    context.fake_source.add_batch(
+        "acct2",
+        SourceType.TIMELINE,
+        "home_following",
+        FetchBatchResult(
+            items=[NormalizedTweet(tweet_id="602", text="delete all 2", created_at=now)],
+            next_cursor=None,
+        ),
+    )
+    assert (await context.container.fetch_service.fetch_account("acct1", trigger="manual")).status == "success"
+    assert (await context.container.fetch_service.fetch_account("acct2", trigger="manual")).status == "success"
+
+    async def container_factory(_: Settings):
+        return context.container
+
+    app = create_app(context.settings, container_factory=container_factory)
+    app.state.container = context.container
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        clear_response = await client.post(
+            "/admin/tweets/clear",
+            json={"account_id": None},
+        )
+        assert clear_response.status_code == 200
+        payload = clear_response.json()
+        assert payload["deleted_tweets"] == 2
+
+        tweets_response = await client.get("/admin/tweets")
+        assert tweets_response.status_code == 200
+        assert tweets_response.json() == []
 
 
 @pytest.mark.asyncio
@@ -381,6 +567,54 @@ async def test_tweet_backfill_ai_route_scores_recent_unscored_tweets(
 
 
 @pytest.mark.asyncio
+async def test_tweet_backfill_ai_route_skips_read_only_accounts(
+    make_test_context,
+) -> None:
+    now = datetime.now(UTC)
+    context = await make_test_context(
+        accounts=[{"id": "acct1", "execution_mode": "read_only"}],
+        settings_overrides={"ai_enabled": True},
+    )
+    context.fake_source.add_batch(
+        "acct1",
+        SourceType.TIMELINE,
+        "home_following",
+        FetchBatchResult(
+            items=[
+                NormalizedTweet(
+                    tweet_id="451-ro",
+                    author_handle="@openai",
+                    text="Read only backfill should not call AI.",
+                    created_at=now,
+                )
+            ],
+            next_cursor=None,
+        ),
+    )
+    fetch_result = await context.container.fetch_service.fetch_account("acct1", trigger="manual")
+    assert fetch_result.status == "success"
+
+    async def container_factory(_: Settings):
+        return context.container
+
+    app = create_app(context.settings, container_factory=container_factory)
+    app.state.container = context.container
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        backfill_response = await client.post(
+            "/admin/tweets/backfill-ai",
+            json={"account_id": "acct1"},
+        )
+        assert backfill_response.status_code == 200
+        payload = backfill_response.json()
+        assert payload["candidate_tweets"] == 0
+        assert payload["scored_tweets"] == 0
+        assert payload["failed_tweets"] == 0
+
+    assert context.fake_llm.decision_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_console_page_is_served(make_test_context) -> None:
     context = await make_test_context(accounts=[{"id": "acct1"}])
 
@@ -394,21 +628,69 @@ async def test_console_page_is_served(make_test_context) -> None:
         response = await client.get("/console")
         assert response.status_code == 200
         assert "OptMonster Console" in response.text
+        groups_console = await client.get("/console/groups")
+        assert groups_console.status_code == 200
+        assert "账号分组" in groups_console.text
         tweet_console = await client.get("/console/tweets")
         assert tweet_console.status_code == 200
-        assert "OptMonster Tweet Workspace" in tweet_console.text
+        assert "推文工作台" in tweet_console.text
         reply_console = await client.get("/console/replies")
         assert reply_console.status_code == 200
-        assert "OptMonster Reply Workspace" in reply_console.text
+        assert "回复处理" in reply_console.text
         ai_console = await client.get("/console/ai")
         assert ai_console.status_code == 200
-        assert "OptMonster AI Settings" in ai_console.text
+        assert "AI 设置" in ai_console.text
         ai_logs_console = await client.get("/console/ai/logs")
         assert ai_logs_console.status_code == 200
-        assert "OptMonster AI Logs" in ai_logs_console.text
+        assert "AI 日志" in ai_logs_console.text
         account_console = await client.get("/console/accounts/acct1")
         assert account_console.status_code == 200
-        assert "OptMonster Account Detail" in account_console.text
+        assert "账号详情" in account_console.text
+
+
+@pytest.mark.asyncio
+async def test_grouped_account_inherits_targets_and_persona(make_test_context) -> None:
+    context = await make_test_context(
+        groups=[
+            {
+                "id": "alpha",
+                "name": "Alpha Squad",
+                "timeline": False,
+                "timeline_recommended": True,
+                "follow_users_enabled": True,
+                "follow_users": [{"handle": "@alpha_builder", "count": 9}],
+                "search_keywords_enabled": False,
+                "persona_name": "Group Operator",
+                "persona_role": "Coordinate launch-day conversations",
+                "persona_tone": "Measured and direct",
+                "reply_style": "Keep replies short and actionable.",
+            }
+        ],
+        accounts=[{"id": "acct1", "group_id": "alpha", "timeline": True}],
+    )
+
+    config_doc = await context.container.account_service.get_account_config("acct1")
+    assert config_doc.account.group_id == "alpha"
+    assert config_doc.group_name == "Alpha Squad"
+    assert config_doc.inherits_targets_from_group is True
+    assert config_doc.inherits_persona_from_group is True
+    assert config_doc.account.targets.timeline is False
+    assert config_doc.account.targets.timeline_recommended is True
+    assert config_doc.account.targets.follow_users[0].handle == "@alpha_builder"
+    assert config_doc.account.targets.search_keywords_enabled is False
+    assert config_doc.account.persona.name == "Group Operator"
+    assert config_doc.account.persona.role == "Coordinate launch-day conversations"
+
+    accounts = await context.container.account_service.list_accounts(
+        fetch_limit_default=context.settings.fetch_limit_default
+    )
+    acct1 = accounts[0]
+    assert acct1.group_id == "alpha"
+    assert acct1.group_name == "Alpha Squad"
+    assert [source.source_type for source in acct1.fetch_sources] == [
+        SourceType.TIMELINE_RECOMMENDED,
+        SourceType.WATCH_USER,
+    ]
 
 
 @pytest.mark.asyncio
@@ -428,6 +710,8 @@ async def test_account_config_route_updates_yaml_and_runtime(make_test_context) 
         assert config_response.status_code == 200
         payload = config_response.json()["account"]
         payload["persona"]["name"] = "Editor"
+        payload["targets"]["timeline_popular"] = True
+        payload["targets"]["timeline_recommended"] = True
         payload["targets"]["follow_users_enabled"] = False
         payload["targets"]["search_keywords_enabled"] = False
         payload["targets"]["search_keywords"] = [{"query": "new keyword", "count": 12}]
@@ -442,6 +726,8 @@ async def test_account_config_route_updates_yaml_and_runtime(make_test_context) 
         assert update_response.status_code == 200
         updated = update_response.json()
         assert updated["account"]["account"]["persona"]["name"] == "Editor"
+        assert updated["account"]["account"]["targets"]["timeline_popular"] is True
+        assert updated["account"]["account"]["targets"]["timeline_recommended"] is True
         assert updated["account"]["account"]["targets"]["follow_users_enabled"] is False
         assert updated["account"]["account"]["targets"]["search_keywords_enabled"] is False
         assert updated["account"]["account"]["fetch_schedule"]["base_interval_minutes"] == 19
@@ -455,6 +741,8 @@ async def test_account_config_route_updates_yaml_and_runtime(make_test_context) 
     yaml_payload = (context.config_dir / "acct1.yaml").read_text(encoding="utf-8")
     assert "Editor" in yaml_payload
     assert "new keyword" in yaml_payload
+    assert "timeline_popular: true" in yaml_payload
+    assert "timeline_recommended: true" in yaml_payload
     assert "follow_users_enabled: false" in yaml_payload
     assert "search_keywords_enabled: false" in yaml_payload
     assert "base_interval_minutes: 19" in yaml_payload
@@ -462,9 +750,149 @@ async def test_account_config_route_updates_yaml_and_runtime(make_test_context) 
     accounts = await context.container.account_service.list_accounts(
         fetch_limit_default=context.settings.fetch_limit_default
     )
-    assert len(accounts[0].fetch_sources) == 1
+    assert len(accounts[0].fetch_sources) == 3
     assert accounts[0].fetch_sources[0].source_type == SourceType.TIMELINE
     assert accounts[0].fetch_sources[0].source_key == "home_following"
+    assert accounts[0].fetch_sources[1].source_type == SourceType.TIMELINE_POPULAR
+    assert accounts[0].fetch_sources[1].source_key == "home_popular"
+    assert accounts[0].fetch_sources[2].source_type == SourceType.TIMELINE_RECOMMENDED
+    assert accounts[0].fetch_sources[2].source_key == "home_for_you"
+
+
+@pytest.mark.asyncio
+async def test_account_config_route_persists_group_assignment(make_test_context) -> None:
+    context = await make_test_context(
+        groups=[
+            {
+                "id": "alpha",
+                "name": "Alpha Squad",
+                "timeline": False,
+                "timeline_popular": True,
+                "follow_users_enabled": True,
+                "follow_users": [{"handle": "@alpha_builder", "count": 7}],
+                "search_keywords_enabled": False,
+                "persona_role": "Own the group mission",
+            }
+        ],
+        accounts=[{"id": "acct1"}],
+    )
+
+    async def container_factory(_: Settings):
+        return context.container
+
+    app = create_app(context.settings, container_factory=container_factory)
+    app.state.container = context.container
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        config_response = await client.get("/admin/accounts/acct1/config")
+        assert config_response.status_code == 200
+        payload = config_response.json()["account"]
+        payload["group_id"] = "alpha"
+
+        update_response = await client.put("/admin/accounts/acct1/config", json=payload)
+        assert update_response.status_code == 200
+        updated = update_response.json()
+        assert updated["account"]["account"]["group_id"] == "alpha"
+        assert updated["account"]["group_name"] == "Alpha Squad"
+        assert updated["account"]["inherits_targets_from_group"] is True
+        assert updated["account"]["inherits_persona_from_group"] is True
+        assert updated["account"]["account"]["targets"]["timeline"] is False
+        assert updated["account"]["account"]["targets"]["timeline_popular"] is True
+        assert (
+            updated["account"]["account"]["targets"]["follow_users"][0]["handle"]
+            == "@alpha_builder"
+        )
+
+    yaml_payload = yaml.safe_load((context.config_dir / "acct1.yaml").read_text(encoding="utf-8"))
+    assert yaml_payload["group_id"] == "alpha"
+
+
+@pytest.mark.asyncio
+async def test_group_crud_routes_and_delete_protection(make_test_context) -> None:
+    context = await make_test_context(
+        groups=[{"id": "alpha", "name": "Alpha Squad"}],
+        accounts=[{"id": "acct1", "group_id": "alpha"}],
+    )
+
+    async def container_factory(_: Settings):
+        return context.container
+
+    app = create_app(context.settings, container_factory=container_factory)
+    app.state.container = context.container
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        list_response = await client.get("/admin/groups")
+        assert list_response.status_code == 200
+        assert list_response.json()[0]["member_account_ids"] == ["acct1"]
+
+        get_response = await client.get("/admin/groups/alpha")
+        assert get_response.status_code == 200
+        assert get_response.json()["group"]["name"] == "Alpha Squad"
+
+        create_response = await client.post(
+            "/admin/groups",
+            json={
+                "id": "beta",
+                "name": "Beta Squad",
+                "targets": {
+                    "timeline": False,
+                    "timeline_popular": True,
+                    "timeline_recommended": True,
+                    "follow_users_enabled": True,
+                    "follow_users": [{"handle": "@beta_builder", "count": 8}],
+                    "search_keywords_enabled": True,
+                    "search_keywords": [{"query": "agent swarm", "count": 6}],
+                },
+                "persona": {
+                    "name": "Beta Operator",
+                    "role": "Own ecosystem research",
+                    "tone": "Analytical",
+                    "language": "English",
+                    "forbidden_topics": ["personal drama"],
+                    "reply_style": "Answer with one concrete takeaway.",
+                },
+            },
+        )
+        assert create_response.status_code == 201
+        assert create_response.json()["group"]["group"]["id"] == "beta"
+
+        update_response = await client.put(
+            "/admin/groups/beta",
+            json={
+                "id": "beta",
+                "name": "Beta Prime",
+                "targets": {
+                    "timeline": False,
+                    "timeline_popular": True,
+                    "timeline_recommended": False,
+                    "follow_users_enabled": True,
+                    "follow_users": [{"handle": "@beta_builder", "count": 12}],
+                    "search_keywords_enabled": False,
+                    "search_keywords": [],
+                },
+                "persona": {
+                    "name": "Beta Operator",
+                    "role": "Own ecosystem research",
+                    "tone": "Analytical",
+                    "language": "English",
+                    "forbidden_topics": ["personal drama"],
+                    "reply_style": "Answer with one concrete takeaway.",
+                },
+            },
+        )
+        assert update_response.status_code == 200
+        assert update_response.json()["group"]["group"]["name"] == "Beta Prime"
+
+        delete_in_use_response = await client.delete("/admin/groups/alpha")
+        assert delete_in_use_response.status_code == 400
+        assert "group is still assigned" in delete_in_use_response.json()["detail"]
+
+        delete_response = await client.delete("/admin/groups/beta")
+        assert delete_response.status_code == 200
+        assert delete_response.json()["deleted_config_file"] is True
+
+    beta_path = context.group_dir / "beta.yaml"
+    assert not beta_path.exists()
 
 
 @pytest.mark.asyncio
@@ -539,6 +967,40 @@ async def test_dashboard_includes_follower_history_and_delta(make_test_context) 
 
 
 @pytest.mark.asyncio
+async def test_dashboard_uses_last_succeeded_action_for_next_action_when_cooldown_missing(
+    make_test_context,
+) -> None:
+    context = await make_test_context(accounts=[{"id": "acct1", "execution_mode": "live"}])
+    executed_at = datetime.now(UTC) - timedelta(minutes=5)
+
+    async with context.session_factory() as session:
+        session.add(
+            ActionRequest(
+                account_id="acct1",
+                action_type=ActionType.LIKE,
+                status=ActionStatus.SUCCEEDED,
+                trigger_source="test",
+                requested_execution_mode=ExecutionMode.LIVE,
+                applied_execution_mode=ExecutionMode.LIVE,
+                executed_at=executed_at,
+            )
+        )
+        await session.commit()
+
+    async def container_factory(_: Settings):
+        return context.container
+
+    app = create_app(context.settings, container_factory=container_factory)
+    app.state.container = context.container
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/admin/dashboard")
+        assert response.status_code == 200
+        next_action_in_seconds = response.json()["accounts"][0]["next_action_in_seconds"]
+        assert 500 <= next_action_in_seconds <= 610
+
+
+@pytest.mark.asyncio
 async def test_tweet_detail_exposes_author_coverage_and_follow_target_route(
     make_test_context,
 ) -> None:
@@ -586,6 +1048,9 @@ async def test_tweet_detail_exposes_author_coverage_and_follow_target_route(
         follow_response = await client.post(f"/admin/tweets/{tweet_id}/follow-targets/acct2")
         assert follow_response.status_code == 200
         assert follow_response.json()["added_to_follow_scope"] is True
+        assert follow_response.json()["scope_owner_type"] == "account"
+        assert follow_response.json()["scope_owner_id"] == "acct2"
+        assert follow_response.json()["scope_owner_label"] == "acct2"
 
         updated_detail = await client.get(f"/admin/tweets/{tweet_id}")
         updated_coverage = {
@@ -593,8 +1058,79 @@ async def test_tweet_detail_exposes_author_coverage_and_follow_target_route(
         }
         assert updated_coverage["acct2"]["follows_author"] is True
 
-    yaml_payload = (context.config_dir / "acct2.yaml").read_text(encoding="utf-8")
-    assert "@builder" in yaml_payload
+    yaml_payload = yaml.safe_load((context.config_dir / "acct2.yaml").read_text(encoding="utf-8"))
+    assert yaml_payload["targets"]["follow_users_enabled"] is True
+    assert yaml_payload["targets"]["follow_users"][0]["handle"] == "@builder"
+
+
+@pytest.mark.asyncio
+async def test_grouped_follow_target_route_updates_group_scope_and_enables_follow_channel(
+    make_test_context,
+) -> None:
+    context = await make_test_context(
+        groups=[
+            {
+                "id": "alpha",
+                "name": "Alpha Squad",
+                "follow_users_enabled": False,
+                "follow_users": [],
+            }
+        ],
+        accounts=[
+            {"id": "acct1", "follow_users": ["@builder"]},
+            {"id": "acct2", "group_id": "alpha"},
+        ],
+        settings_overrides={"action_interval_jitter_seconds": 0},
+    )
+    context.fake_source.add_batch(
+        "acct1",
+        SourceType.TIMELINE,
+        "home_following",
+        FetchBatchResult(
+            items=[
+                NormalizedTweet(
+                    tweet_id="302",
+                    author_handle="@builder",
+                    text="Grouped accounts should inherit follow targets from the group.",
+                    created_at=datetime.now(UTC),
+                )
+            ],
+            next_cursor=None,
+        ),
+    )
+    await context.container.fetch_service.fetch_account("acct1", trigger="manual")
+
+    async def container_factory(_: Settings):
+        return context.container
+
+    app = create_app(context.settings, container_factory=container_factory)
+    app.state.container = context.container
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        tweets_response = await client.get("/admin/tweets")
+        tweet_id = tweets_response.json()[0]["id"]
+
+        follow_response = await client.post(f"/admin/tweets/{tweet_id}/follow-targets/acct2")
+        assert follow_response.status_code == 200
+        payload = follow_response.json()
+        assert payload["added_to_follow_scope"] is True
+        assert payload["scope_owner_type"] == "group"
+        assert payload["scope_owner_id"] == "alpha"
+        assert payload["scope_owner_label"] == "Alpha Squad"
+
+        updated_detail = await client.get(f"/admin/tweets/{tweet_id}")
+        updated_coverage = {
+            item["account_id"]: item for item in updated_detail.json()["author_coverage"]
+        }
+        assert updated_coverage["acct2"]["follows_author"] is True
+
+    group_yaml = yaml.safe_load((context.group_dir / "alpha.yaml").read_text(encoding="utf-8"))
+    assert group_yaml["targets"]["follow_users_enabled"] is True
+    assert group_yaml["targets"]["follow_users"][0]["handle"] == "@builder"
+
+    account_yaml = yaml.safe_load((context.config_dir / "acct2.yaml").read_text(encoding="utf-8"))
+    assert account_yaml["group_id"] == "alpha"
+    assert account_yaml["targets"]["follow_users"] == []
 
 
 @pytest.mark.asyncio
@@ -710,11 +1246,15 @@ async def test_runtime_settings_route_updates_env_file_and_dashboard(
                 "fetch_latest_first": True,
                 "fetch_include_replies": False,
                 "fetch_include_retweets": False,
+                "popular_tweet_min_views": 100000,
+                "popular_tweet_min_likes": 800,
+                "popular_tweet_min_retweets": 80,
+                "popular_tweet_min_replies": 25,
                 "llm_provider": "openai_compatible",
                 "llm_base_url": "https://llm.example/v1",
                 "llm_model_id": "vendor/model-1",
                 "llm_api_key": "sk-secret-1234",
-                "replace_api_key": True,
+                "replace_api_key": False,
             },
         )
         assert update_response.status_code == 200
@@ -725,6 +1265,10 @@ async def test_runtime_settings_route_updates_env_file_and_dashboard(
         assert updated["runtime_settings"]["fetch_latest_first"] is True
         assert updated["runtime_settings"]["fetch_include_replies"] is False
         assert updated["runtime_settings"]["fetch_include_retweets"] is False
+        assert updated["runtime_settings"]["popular_tweet_min_views"] == 100000
+        assert updated["runtime_settings"]["popular_tweet_min_likes"] == 800
+        assert updated["runtime_settings"]["popular_tweet_min_retweets"] == 80
+        assert updated["runtime_settings"]["popular_tweet_min_replies"] == 25
         assert updated["runtime_settings"]["llm_provider"] == "openai_compatible"
         assert updated["runtime_settings"]["llm_model_id"] == "vendor/model-1"
         assert updated["runtime_settings"]["llm_api_key_masked"] == "sk-s...1234"
@@ -738,6 +1282,10 @@ async def test_runtime_settings_route_updates_env_file_and_dashboard(
         assert dashboard["runtime_settings"]["fetch_latest_first"] is True
         assert dashboard["runtime_settings"]["fetch_include_replies"] is False
         assert dashboard["runtime_settings"]["fetch_include_retweets"] is False
+        assert dashboard["runtime_settings"]["popular_tweet_min_views"] == 100000
+        assert dashboard["runtime_settings"]["popular_tweet_min_likes"] == 800
+        assert dashboard["runtime_settings"]["popular_tweet_min_retweets"] == 80
+        assert dashboard["runtime_settings"]["popular_tweet_min_replies"] == 25
         assert dashboard["runtime_settings"]["llm_provider"] == "openai_compatible"
         assert dashboard["runtime_settings"]["llm_model_id"] == "vendor/model-1"
 
@@ -773,7 +1321,7 @@ async def test_runtime_prompt_test_route_returns_llm_output(make_test_context) -
 
 @pytest.mark.asyncio
 async def test_ai_logs_routes_return_prompt_and_decision_logs(make_test_context) -> None:
-    context = await make_test_context(accounts=[{"id": "acct1"}])
+    context = await make_test_context(accounts=[{"id": "acct1", "execution_mode": "live"}])
     context.fake_source.add_batch(
         "acct1",
         SourceType.TIMELINE,

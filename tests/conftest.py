@@ -112,6 +112,30 @@ class FakeTwitterDataSource(TwitterDataSource):
         )
         return self._resolve(account.id, SourceType.TIMELINE, "home_following")
 
+    async def fetch_for_you_timeline(
+        self,
+        account,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> FetchBatchResult:
+        self.fetch_requests.append(
+            (account.id, SourceType.TIMELINE_RECOMMENDED, "home_for_you", cursor, limit)
+        )
+        return self._resolve(account.id, SourceType.TIMELINE_RECOMMENDED, "home_for_you")
+
+    async def fetch_popular_timeline(
+        self,
+        account,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> FetchBatchResult:
+        self.fetch_requests.append(
+            (account.id, SourceType.TIMELINE_POPULAR, "home_popular", cursor, limit)
+        )
+        return self._resolve(account.id, SourceType.TIMELINE_POPULAR, "home_popular")
+
     async def fetch_user_tweets(
         self,
         account,
@@ -480,6 +504,7 @@ class TestContext:
     container: ServiceContainer
     settings: Settings
     config_dir: Path
+    group_dir: Path
     cookie_dir: Path
     engine: AsyncEngine
     session_factory: async_sessionmaker[AsyncSession]
@@ -534,15 +559,55 @@ async def make_test_context(tmp_path: Path) -> Callable[..., Any]:
     async def _make_test_context(
         *,
         accounts: list[dict[str, Any]],
+        groups: list[dict[str, Any]] | None = None,
         settings_overrides: dict[str, Any] | None = None,
         llm_service: FakeLLMService | None = None,
         action_executor: FakeTwitterActionExecutor | None = None,
     ) -> TestContext:
         case_root = tmp_path / f"case_{len(created)}"
         config_dir = case_root / "accounts"
+        group_dir = case_root / "groups"
         cookie_dir = case_root / "cookies"
         config_dir.mkdir(parents=True, exist_ok=True)
+        group_dir.mkdir(parents=True, exist_ok=True)
         cookie_dir.mkdir(parents=True, exist_ok=True)
+
+        for group in groups or []:
+            group_id = group["id"]
+            payload = {
+                "id": group_id,
+                "name": group.get("name", group_id),
+                "targets": group.get(
+                    "targets",
+                    {
+                        "timeline": group.get("timeline", True),
+                        "timeline_popular": group.get("timeline_popular", False),
+                        "timeline_recommended": group.get("timeline_recommended", False),
+                        "follow_users_enabled": group.get("follow_users_enabled", True),
+                        "follow_users": group.get("follow_users", []),
+                        "search_keywords_enabled": group.get("search_keywords_enabled", True),
+                        "search_keywords": group.get("search_keywords", []),
+                    },
+                ),
+                "persona": group.get(
+                    "persona",
+                    {
+                        "name": group.get("persona_name", "Operator"),
+                        "role": group.get("persona_role", "Thoughtful X account operator"),
+                        "tone": group.get("persona_tone", "Clear, concise, and warm"),
+                        "language": group.get("persona_language", "English"),
+                        "forbidden_topics": group.get("forbidden_topics", []),
+                        "reply_style": group.get(
+                            "reply_style",
+                            "Offer one concrete thought or question in under 40 words.",
+                        ),
+                    },
+                ),
+            }
+            (group_dir / f"{group_id}.yaml").write_text(
+                yaml.safe_dump(payload, sort_keys=False),
+                encoding="utf-8",
+            )
 
         for account in accounts:
             account_id = account["id"]
@@ -554,8 +619,11 @@ async def make_test_context(tmp_path: Path) -> Callable[..., Any]:
                 "enabled": account.get("enabled", True),
                 "execution_mode": account.get("execution_mode", "read_only"),
                 "cookie_file": str(cookie_path),
+                "group_id": account.get("group_id"),
                 "targets": {
                     "timeline": account.get("timeline", True),
+                    "timeline_popular": account.get("timeline_popular", False),
+                    "timeline_recommended": account.get("timeline_recommended", False),
                     "follow_users_enabled": account.get("follow_users_enabled", True),
                     "follow_users": account.get("follow_users", []),
                     "search_keywords_enabled": account.get("search_keywords_enabled", True),
@@ -594,6 +662,7 @@ async def make_test_context(tmp_path: Path) -> Callable[..., Any]:
             database_url=f"sqlite+aiosqlite:///{db_path}",
             redis_url="redis://unused/0",
             config_dir=config_dir,
+            group_config_dir=group_dir,
             cookie_dir=cookie_dir,
             scheduled_fetch_interval_seconds=0,
             worker_poll_interval_seconds=1,
@@ -622,6 +691,7 @@ async def make_test_context(tmp_path: Path) -> Callable[..., Any]:
             container=container,
             settings=settings,
             config_dir=config_dir,
+            group_dir=group_dir,
             cookie_dir=cookie_dir,
             engine=engine,
             session_factory=session_factory,

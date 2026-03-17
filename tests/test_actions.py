@@ -331,6 +331,49 @@ async def test_generate_reply_route_returns_actions_and_tweet_detail(make_test_c
 
 
 @pytest.mark.asyncio
+async def test_generate_reply_route_is_blocked_for_read_only_accounts(make_test_context) -> None:
+    context = await make_test_context(accounts=[{"id": "acct1", "execution_mode": "read_only"}])
+    context.fake_source.add_batch(
+        "acct1",
+        SourceType.TIMELINE,
+        "home_following",
+        FetchBatchResult(
+            items=[
+                NormalizedTweet(
+                    tweet_id="201-ro",
+                    author_handle="@openai",
+                    text="Read only accounts should not trigger AI review.",
+                    created_at=datetime.now(UTC),
+                )
+            ],
+            next_cursor=None,
+        ),
+    )
+    await context.container.fetch_service.fetch_account("acct1", trigger="manual")
+    context.settings.ai_enabled = True
+
+    async def container_factory(_: Settings):
+        return context.container
+
+    app = create_app(context.settings, container_factory=container_factory)
+    app.state.container = context.container
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        tweets_response = await client.get("/admin/tweets")
+        assert tweets_response.status_code == 200
+        tweet_id = tweets_response.json()[0]["id"]
+
+        generate_response = await client.post(
+            f"/admin/tweets/{tweet_id}/reply/generate",
+            json={"account_id": "acct1"},
+        )
+        assert generate_response.status_code == 400
+        assert generate_response.json()["detail"] == "AI review is disabled for read_only accounts"
+
+    assert context.fake_llm.decision_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_reply_workspace_route_returns_pending_reply_items(make_test_context) -> None:
     context = await make_test_context(accounts=[{"id": "acct1", "execution_mode": "dry_run"}])
     context.settings.ai_enabled = True
@@ -404,6 +447,99 @@ async def test_generate_reply_reuses_existing_actions_for_same_tweet(make_test_c
     assert first.reply_action is not None and second.reply_action is not None
     assert first.like_action.id == second.like_action.id
     assert first.reply_action.id == second.reply_action.id
+
+
+@pytest.mark.asyncio
+async def test_duplicate_rows_from_for_you_and_hot_reuse_same_actions(make_test_context) -> None:
+    context = await make_test_context(
+        accounts=[
+            {
+                "id": "acct1",
+                "execution_mode": "dry_run",
+                "timeline": False,
+                "timeline_recommended": True,
+                "timeline_popular": True,
+            }
+        ],
+    )
+    shared_text = "The same tweet can arrive from both For You and Hot feeds."
+    context.fake_source.add_batch(
+        "acct1",
+        SourceType.TIMELINE_RECOMMENDED,
+        "home_for_you",
+        FetchBatchResult(
+            items=[
+                NormalizedTweet(
+                    tweet_id="dup-301",
+                    author_handle="@builder",
+                    text=shared_text,
+                    created_at=datetime.now(UTC),
+                    view_count=180000,
+                    like_count=900,
+                    retweet_count=120,
+                    reply_count=40,
+                )
+            ],
+            next_cursor=None,
+        ),
+    )
+    context.fake_source.add_batch(
+        "acct1",
+        SourceType.TIMELINE_POPULAR,
+        "home_popular",
+        FetchBatchResult(
+            items=[
+                NormalizedTweet(
+                    tweet_id="dup-301",
+                    author_handle="@builder",
+                    text=shared_text,
+                    created_at=datetime.now(UTC),
+                    view_count=180000,
+                    like_count=900,
+                    retweet_count=120,
+                    reply_count=40,
+                )
+            ],
+            next_cursor=None,
+        ),
+    )
+    fetch_result = await context.container.fetch_service.fetch_account("acct1", trigger="manual")
+    assert fetch_result.status == "success"
+
+    tweets = await context.container.account_service.list_tweets(account_id="acct1")
+    assert len(tweets) == 2
+    assert {tweet.source_type for tweet in tweets} == {
+        SourceType.TIMELINE_RECOMMENDED,
+        SourceType.TIMELINE_POPULAR,
+    }
+
+    context.settings.ai_enabled = True
+    context.fake_llm.set_decision(
+        "acct1",
+        shared_text,
+        DecisionResult(
+            relevance_score=8,
+            like=True,
+            reply_draft="One concrete reply.",
+            reply_confidence=7,
+            rationale="same tweet across feeds",
+        ),
+    )
+
+    first = await context.container.action_service.generate_reply_for_tweet(
+        tweets[0].id,
+        GenerateReplyRequest(account_id="acct1"),
+    )
+    second = await context.container.action_service.generate_reply_for_tweet(
+        tweets[1].id,
+        GenerateReplyRequest(account_id="acct1"),
+    )
+
+    assert first.like_action is not None and second.like_action is not None
+    assert first.reply_action is not None and second.reply_action is not None
+    assert first.like_action.id == second.like_action.id
+    assert first.reply_action.id == second.reply_action.id
+    assert context.fake_llm.decision_calls == 1
 
 
 @pytest.mark.asyncio

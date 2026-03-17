@@ -175,6 +175,8 @@ class ActionService:
         if not self.settings.ai_enabled:
             raise ValueError("AI is disabled")
         account = await self._get_account(payload.account_id)
+        if account.execution_mode == ExecutionMode.READ_ONLY:
+            raise ValueError("AI review is disabled for read_only accounts")
         async with self.session_factory() as session:
             tweet = await session.get(FetchedTweet, tweet_record_id)
             if tweet is None:
@@ -994,7 +996,9 @@ class ActionService:
         if target_user_handle is not None:
             query = query.where(ActionRequest.target_user_handle == target_user_handle)
         query = query.order_by(ActionRequest.created_at.desc(), ActionRequest.id.desc())
-        if fetched_tweet_id is not None:
+        # target_tweet_id is the canonical tweet identity; reuse actions across
+        # duplicated fetched rows from different sources (for_you / hot / etc).
+        if fetched_tweet_id is not None and target_tweet_id is None:
             query = query.where(ActionRequest.fetched_tweet_id == fetched_tweet_id)
 
         actions = (await session.execute(query)).scalars().all()

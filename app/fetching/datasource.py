@@ -26,6 +26,26 @@ class TwitterDataSource(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def fetch_for_you_timeline(
+        self,
+        account: AccountConfig,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> FetchBatchResult:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def fetch_popular_timeline(
+        self,
+        account: AccountConfig,
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> FetchBatchResult:
+        raise NotImplementedError
+
+    @abstractmethod
     async def fetch_user_tweets(
         self,
         account: AccountConfig,

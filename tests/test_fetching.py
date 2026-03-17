@@ -132,6 +132,32 @@ def test_twikit_normalization_prefers_full_text_from_payload() -> None:
     assert normalized.text == "This is the longer full text from the payload with more context."
 
 
+def test_twikit_normalization_captures_engagement_metrics() -> None:
+    source = TwikitDataSource(Settings(_env_file=None))
+
+    class DummyUser:
+        screen_name = "openai"
+
+    class DummyTweet:
+        id = "1002"
+        text = "Metrics payload"
+        lang = "en"
+        user = DummyUser()
+        created_at_datetime = datetime.now(UTC)
+        view_count = "120001"
+        favorite_count = 780
+        retweet_count = 65
+        reply_count = 24
+        _data = {"legacy": {}}
+
+    normalized = source._normalize_tweet(DummyTweet())
+
+    assert normalized.view_count == 120001
+    assert normalized.like_count == 780
+    assert normalized.retweet_count == 65
+    assert normalized.reply_count == 24
+
+
 @pytest.mark.asyncio
 async def test_fetch_latest_first_restarts_from_head_and_deduplicates(make_test_context) -> None:
     context = await make_test_context(accounts=[{"id": "acct1"}])
@@ -239,6 +265,125 @@ async def test_fetch_latest_first_stops_when_page_reaches_recent_window(make_tes
 
 
 @pytest.mark.asyncio
+async def test_fetch_recommended_timeline_uses_for_you_source(make_test_context) -> None:
+    context = await make_test_context(
+        accounts=[
+            {
+                "id": "acct1",
+                "timeline": False,
+                "timeline_recommended": True,
+                "follow_users_enabled": False,
+                "search_keywords_enabled": False,
+            }
+        ]
+    )
+
+    context.fake_source.add_batch(
+        "acct1",
+        SourceType.TIMELINE_RECOMMENDED,
+        "home_for_you",
+        FetchBatchResult(
+            items=[
+                NormalizedTweet(tweet_id="fy-1", text="Recommended post 1"),
+                NormalizedTweet(tweet_id="fy-2", text="Recommended post 2"),
+            ],
+            next_cursor=None,
+        ),
+    )
+
+    result = await context.container.fetch_service.fetch_account("acct1", trigger="manual")
+
+    assert result.status == "success"
+    assert result.tweets_inserted == 2
+    assert context.fake_source.fetch_requests == [
+        ("acct1", SourceType.TIMELINE_RECOMMENDED, "home_for_you", None, 20)
+    ]
+    tweets = await context.container.account_service.list_tweets(account_id="acct1")
+    assert [tweet.tweet_id for tweet in tweets] == ["fy-2", "fy-1"]
+    assert all(tweet.source_type == SourceType.TIMELINE_RECOMMENDED for tweet in tweets)
+    cursor = await context.get_cursor("acct1", SourceType.TIMELINE_RECOMMENDED, "home_for_you")
+    assert cursor is not None
+    assert cursor.cursor is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_popular_timeline_filters_to_thresholds(make_test_context) -> None:
+    context = await make_test_context(
+        accounts=[
+            {
+                "id": "acct1",
+                "timeline": False,
+                "timeline_recommended": False,
+                "timeline_popular": True,
+                "follow_users_enabled": False,
+                "search_keywords_enabled": False,
+            }
+        ],
+        settings_overrides={
+            "popular_tweet_min_views": 100000,
+            "popular_tweet_min_likes": 500,
+            "popular_tweet_min_retweets": 50,
+            "popular_tweet_min_replies": 20,
+        },
+    )
+
+    context.fake_source.add_batch(
+        "acct1",
+        SourceType.TIMELINE_POPULAR,
+        "home_popular",
+        FetchBatchResult(
+            items=[
+                NormalizedTweet(
+                    tweet_id="hot-1",
+                    text="viral post",
+                    view_count=120000,
+                    like_count=900,
+                    retweet_count=80,
+                    reply_count=40,
+                ),
+                NormalizedTweet(
+                    tweet_id="hot-2",
+                    text="not enough views",
+                    view_count=90000,
+                    like_count=900,
+                    retweet_count=80,
+                    reply_count=40,
+                ),
+                NormalizedTweet(
+                    tweet_id="hot-3",
+                    text="not enough likes",
+                    view_count=150000,
+                    like_count=300,
+                    retweet_count=80,
+                    reply_count=40,
+                ),
+            ],
+            next_cursor=None,
+        ),
+    )
+
+    result = await context.container.fetch_service.fetch_account("acct1", trigger="manual")
+
+    assert result.status == "success"
+    assert result.tweets_inserted == 1
+    assert context.fake_source.fetch_requests == [
+        ("acct1", SourceType.TIMELINE_POPULAR, "home_popular", None, 20)
+    ]
+    tweets = await context.container.account_service.list_tweets(account_id="acct1")
+    assert [tweet.tweet_id for tweet in tweets] == ["hot-1"]
+    assert tweets[0].view_count == 120000
+    async with context.session_factory() as session:
+        filter_log = (
+            await session.execute(
+                select(AILogRecord)
+                .where(AILogRecord.account_id == "acct1", AILogRecord.log_type == "fetch_filter")
+                .order_by(AILogRecord.id.desc())
+            )
+        ).scalar_one()
+    assert filter_log.response_payload["popular_filtered"] == 2
+
+
+@pytest.mark.asyncio
 async def test_fetch_filters_replies_and_retweets_when_disabled(make_test_context) -> None:
     context = await make_test_context(
         accounts=[{"id": "acct1"}],
@@ -279,6 +424,7 @@ async def test_fetch_filters_replies_and_retweets_when_disabled(make_test_contex
     assert filter_log.response_payload == {
         "reply_filtered": 1,
         "retweet_filtered": 1,
+        "popular_filtered": 0,
     }
 
 
@@ -366,6 +512,59 @@ async def test_fetch_records_auto_score_skip_when_ai_disabled(make_test_context)
         "reason": "ai_disabled",
         "skipped_count": 1,
     }
+
+
+@pytest.mark.asyncio
+async def test_fetch_skips_auto_score_for_read_only_accounts(make_test_context) -> None:
+    context = await make_test_context(
+        accounts=[{"id": "acct1", "execution_mode": "read_only"}],
+        settings_overrides={"ai_enabled": True},
+    )
+    context.fake_source.add_batch(
+        "acct1",
+        SourceType.TIMELINE,
+        "home_following",
+        FetchBatchResult(
+            items=[
+                NormalizedTweet(
+                    tweet_id="25-ro",
+                    author_handle="@openai",
+                    text="Read only fetch should not call AI.",
+                    created_at=datetime.now(UTC),
+                )
+            ],
+            next_cursor=None,
+        ),
+    )
+
+    result = await context.container.fetch_service.fetch_account("acct1", trigger="manual")
+
+    assert result.status == "success"
+    assert context.fake_llm.decision_calls == 0
+    tweets = await context.container.account_service.list_tweets(account_id="acct1")
+    assert tweets[0].interaction_state == "unscored"
+    async with context.session_factory() as session:
+        skip_log = (
+            await session.execute(
+                select(AILogRecord)
+                .where(AILogRecord.account_id == "acct1", AILogRecord.log_type == "auto_score_skip")
+                .order_by(AILogRecord.id.desc())
+            )
+        ).scalar_one()
+        decision_logs = (
+            await session.execute(
+                select(AILogRecord).where(
+                    AILogRecord.account_id == "acct1",
+                    AILogRecord.log_type == "decision",
+                )
+            )
+        ).scalars().all()
+    assert skip_log.status == "skipped"
+    assert skip_log.response_payload == {
+        "reason": "read_only",
+        "skipped_count": 1,
+    }
+    assert decision_logs == []
 
 
 @pytest.mark.asyncio

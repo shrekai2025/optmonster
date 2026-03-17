@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OptMonster · 账号总览</title>
-    <link rel="stylesheet" href="/ui/theme.css" />
+    <link rel="stylesheet" href="/ui/theme.css?v=20260316b" />
     <style>
       .layout-accounts {
         display: grid;
@@ -51,9 +51,19 @@
       .account-card-head {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
+        gap: 12px;
         align-items: flex-start;
         justify-content: space-between;
+      }
+
+      .account-entry {
+        min-width: 0;
+        text-decoration: none;
+        color: inherit;
+      }
+      .account-entry:hover .account-name,
+      .account-entry:focus-visible .account-name {
+        color: var(--accent);
       }
 
       .account-name {
@@ -61,6 +71,7 @@
         font-weight: 600;
         color: var(--text);
         letter-spacing: -0.02em;
+        transition: color var(--transition);
       }
       .account-meta {
         font-size: 11.5px;
@@ -68,14 +79,90 @@
         margin-top: 1px;
       }
 
+      .account-controls {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: flex-end;
+      }
       .account-actions {
         display: flex;
         flex-wrap: wrap;
         gap: 5px;
         align-items: center;
+        justify-content: flex-end;
       }
-      .account-actions a.chip { cursor: pointer; text-decoration: none; }
       .account-actions button { padding: 4px 10px; font-size: 11.5px; }
+      .mode-toggle {
+        min-height: 34px;
+      }
+      .mode-toggle .toggle-option {
+        min-width: 72px;
+      }
+      .mode-toggle .toggle-option.active {
+        background: var(--accent-dim);
+        color: var(--accent);
+      }
+      .mode-toggle .toggle-option:focus-visible {
+        outline: 2px solid rgba(108,140,255,0.55);
+        outline-offset: 1px;
+      }
+      .stat-pill-trigger {
+        appearance: none;
+        border: none;
+        padding: 0;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        font: inherit;
+        letter-spacing: inherit;
+        text-transform: inherit;
+      }
+      .stat-pill-trigger:hover,
+      .stat-pill-trigger:focus-visible {
+        color: var(--accent);
+      }
+      .quota-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 7px;
+        margin-top: 8px;
+      }
+      .quota-pill {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 10px 12px;
+        min-width: 0;
+      }
+      .quota-pill .label {
+        font-size: 10.5px;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .quota-pill .value {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text);
+        margin-top: 3px;
+        letter-spacing: -0.02em;
+      }
+      .quota-pill .meta {
+        font-size: 11px;
+        color: var(--text-muted);
+        margin-top: 3px;
+      }
+      .trend-modal-summary {
+        margin-top: 0;
+        margin-bottom: 10px;
+      }
+      .trend-modal-chart {
+        margin-top: 0;
+      }
+      .trend-modal-chart .sparkline-svg {
+        height: 180px;
+      }
 
       /* Op log */
       .op-row {
@@ -100,6 +187,10 @@
       .op-title    { font-size: 12.5px; font-weight: 500; color: var(--text); }
       .op-detail   { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
       .op-time     { font-size: 11px; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; padding-top: 1px; }
+      .queue-stack {
+        display: grid;
+        gap: 14px;
+      }
 
       /* Import preview */
       .import-preview {
@@ -123,6 +214,21 @@
       @media (max-width: 1100px) {
         .layout-accounts { grid-template-columns: 1fr; }
       }
+      @media (max-width: 760px) {
+        .account-controls {
+          width: 100%;
+          align-items: stretch;
+        }
+        .account-actions {
+          justify-content: flex-start;
+        }
+        .mode-toggle {
+          width: 100%;
+        }
+        .mode-toggle .toggle-option {
+          flex: 1;
+        }
+      }
     </style>
   </head>
   <body>
@@ -131,6 +237,7 @@
       <span class="topnav-brand">Opt<span>Monster</span></span>
       <div class="topnav-divider"></div>
       <a href="/console" class="active">账号总览</a>
+      <a href="/console/groups">账号分组</a>
       <a href="/console/tweets">推文工作台</a>
       <a href="/console/replies">回复处理</a>
       <a href="/console/ai">AI 设置</a>
@@ -148,7 +255,7 @@
           <div class="page-title-group">
             <p class="page-eyebrow">OptMonster Console</p>
             <h1 class="page-title">账号总览</h1>
-            <p class="page-subtitle">账号状态、预算血条与配置管理</p>
+            <p class="page-subtitle">账号状态、预算与配置管理</p>
           </div>
         </div>
       </div>
@@ -165,9 +272,9 @@
       <!-- Global toggles -->
       <form id="runtime-quick-form" class="global-toggles">
         <span class="toggle-label">全局开关</span>
-        <label class="inline"><input id="quick-ai-enabled" type="checkbox" /> AI 评分</label>
-        <label class="inline"><input id="quick-fetch-replies" type="checkbox" /> 抓回复</label>
-        <label class="inline"><input id="quick-fetch-retweets" type="checkbox" /> 抓 RT</label>
+        <label class="inline"><input id="quick-ai-enabled" type="checkbox" /><span class="inline-label-text">AI 评分</span></label>
+        <label class="inline"><input id="quick-fetch-replies" type="checkbox" /><span class="inline-label-text">抓回复</span></label>
+        <label class="inline"><input id="quick-fetch-retweets" type="checkbox" /><span class="inline-label-text">抓 RT</span></label>
         <div class="save-row">
           <span id="runtime-settings" class="runtime-ribbon"></span>
           <button type="submit" class="ghost">保存开关</button>
@@ -194,15 +301,28 @@
 
         <!-- Right: operations log -->
         <div>
-          <div class="card">
-            <div class="card-header">
-              <div class="card-title-group">
-                <p class="card-eyebrow">Operations</p>
-                <p class="card-title">最近操作日志</p>
+          <div class="queue-stack">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title-group">
+                  <p class="card-eyebrow">Operations</p>
+                  <p class="card-title">最近操作日志</p>
+                </div>
+              </div>
+              <div class="card-body" style="padding: 0 16px;">
+                <div id="operations-list"></div>
               </div>
             </div>
-            <div class="card-body" style="padding: 0 16px;">
-              <div id="operations-list"></div>
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title-group">
+                  <p class="card-eyebrow">Queue</p>
+                  <p class="card-title">抓取队列</p>
+                </div>
+              </div>
+              <div class="card-body" style="padding: 0 16px;">
+                <div id="fetch-queue-list"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -245,7 +365,7 @@
                 </select>
               </div>
               <div class="field" style="align-content: end;">
-                <label class="inline"><input id="import-enabled" type="checkbox" checked /> enabled</label>
+                <label class="inline"><input id="import-enabled" type="checkbox" checked /><span class="inline-label-text">enabled</span></label>
               </div>
               <div class="field full">
                 <label for="import-extra-yaml">额外 YAML 字段（可选）</label>
@@ -269,16 +389,43 @@ targets:
       </div>
     </div>
 
+    <div class="modal-backdrop" id="follower-trend-modal" aria-hidden="true">
+      <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="follower-trend-title"
+        tabindex="-1"
+      >
+        <div class="modal-header">
+          <div>
+            <div id="follower-trend-title" class="modal-title">粉丝变化趋势</div>
+            <div id="follower-trend-subtitle" class="modal-subtitle">最近采样趋势</div>
+          </div>
+          <button class="modal-close" data-close-modal="follower-trend-modal" aria-label="关闭粉丝变化趋势弹窗">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="follower-trend-summary" class="chip-row trend-modal-summary"></div>
+          <div id="follower-trend-content" class="sparkline-wrap trend-modal-chart"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="ghost" data-close-modal="follower-trend-modal" style="margin-left:auto;">关闭</button>
+        </div>
+      </div>
+    </div>
+
     <script>
       const state = {
         dashboard: null,
         accounts: [],
         cookieCandidates: [],
         countdownTimer: null,
+        modalReturnFocus: {},
       };
 
       const accountsList       = document.getElementById("accounts-list");
       const operationsList     = document.getElementById("operations-list");
+      const fetchQueueList     = document.getElementById("fetch-queue-list");
       const statusText         = document.getElementById("status-text");
       const statusBar          = document.getElementById("status-bar");
       const summaryGrid        = document.getElementById("summary-grid");
@@ -293,13 +440,56 @@ targets:
       const quickAiEnabled     = document.getElementById("quick-ai-enabled");
       const quickFetchReplies  = document.getElementById("quick-fetch-replies");
       const quickFetchRetweets = document.getElementById("quick-fetch-retweets");
+      const followerTrendTitle = document.getElementById("follower-trend-title");
+      const followerTrendSubtitle = document.getElementById("follower-trend-subtitle");
+      const followerTrendSummary = document.getElementById("follower-trend-summary");
+      const followerTrendContent = document.getElementById("follower-trend-content");
+      const FOCUSABLE_SELECTOR = [
+        "a[href]",
+        "area[href]",
+        "input:not([disabled]):not([type='hidden'])",
+        "select:not([disabled])",
+        "textarea:not([disabled])",
+        "button:not([disabled])",
+        "[tabindex]:not([tabindex='-1'])",
+      ].join(",");
 
       // ── Modal helpers ──────────────────────────
-      function openModal(id) {
-        document.getElementById(id).classList.add("open");
+      function getFocusableElements(container) {
+        if (!container) return [];
+        return Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR))
+          .filter(node => !node.hasAttribute("disabled"));
       }
+
+      function openModal(id, trigger = document.activeElement) {
+        const backdrop = document.getElementById(id);
+        if (!backdrop) return;
+        if (trigger instanceof HTMLElement) {
+          state.modalReturnFocus[id] = trigger;
+        }
+        backdrop.classList.add("open");
+        backdrop.setAttribute("aria-hidden", "false");
+        const modal = backdrop.querySelector(".modal");
+        window.requestAnimationFrame(() => {
+          const focusables = getFocusableElements(modal);
+          if (focusables.length) {
+            focusables[0].focus();
+          } else {
+            modal?.focus();
+          }
+        });
+      }
+
       function closeModal(id) {
-        document.getElementById(id).classList.remove("open");
+        const backdrop = document.getElementById(id);
+        if (!backdrop) return;
+        backdrop.classList.remove("open");
+        backdrop.setAttribute("aria-hidden", "true");
+        const previousFocus = state.modalReturnFocus[id];
+        if (previousFocus && document.contains(previousFocus)) {
+          previousFocus.focus();
+        }
+        delete state.modalReturnFocus[id];
       }
 
       document.querySelectorAll("[data-close-modal]").forEach(btn => {
@@ -307,12 +497,29 @@ targets:
       });
       document.querySelectorAll(".modal-backdrop").forEach(backdrop => {
         backdrop.addEventListener("click", e => {
-          if (e.target === backdrop) backdrop.classList.remove("open");
+          if (e.target === backdrop) closeModal(backdrop.id);
         });
       });
       document.addEventListener("keydown", e => {
-        if (e.key === "Escape")
-          document.querySelectorAll(".modal-backdrop.open").forEach(m => m.classList.remove("open"));
+        const openBackdrop = document.querySelector(".modal-backdrop.open");
+        if (!openBackdrop) return;
+        if (e.key === "Escape") {
+          closeModal(openBackdrop.id);
+          return;
+        }
+        if (e.key !== "Tab") return;
+        const modal = openBackdrop.querySelector(".modal");
+        const focusables = getFocusableElements(modal);
+        if (!focusables.length) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       });
 
       // ── Utils ──────────────────────────────────
@@ -341,6 +548,16 @@ targets:
         return new Date(v).toLocaleString();
       }
 
+      function formatRelativeElapsed(v) {
+        if (!v) return "n/a";
+        const elapsedSeconds = Math.max(0, Math.floor((Date.now() - new Date(v).getTime()) / 1000));
+        const hours = Math.floor(elapsedSeconds / 3600);
+        const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+        if (hours > 0) return `${hours}小时${minutes}分钟前`;
+        if (minutes > 0) return `${minutes}分钟前`;
+        return "刚刚";
+      }
+
       function formatDuration(seconds) {
         const rem = Math.max(0, Number(seconds || 0));
         const h = Math.floor(rem / 3600);
@@ -351,6 +568,25 @@ targets:
         if (m || h) parts.push(`${m}m`);
         parts.push(`${s}s`);
         return parts.join(" ");
+      }
+
+      function formatFollowerDelta(account) {
+        if (account.follower_delta == null) return "暂无对比";
+        return `${account.follower_delta >= 0 ? "+" : ""}${account.follower_delta}`;
+      }
+
+      function formatNextAction(account) {
+        if (!account.enabled || account.lifecycle_status !== "enabled") return "停用";
+        if (account.execution_mode === "read_only") return "只读";
+        if (Number(account.next_action_in_seconds || 0) <= 0) return "现在";
+        return formatDuration(account.next_action_in_seconds);
+      }
+
+      function budgetLabel(actionType) {
+        if (actionType === "like") return "点赞";
+        if (actionType === "reply") return "回复";
+        if (actionType === "follow") return "关注";
+        return actionType;
       }
 
       function setStatus(message, level = "") {
@@ -421,28 +657,27 @@ targets:
         `;
       }
 
-      function renderBudgetRow(budget) {
-        const pct = Math.max(0, Math.min(100, Math.round((budget.ratio || 0) * 100)));
-        const fillClass = pct <= 15 ? "low" : "";
+      function renderQuotaCard(budget) {
         return `
-          <div class="budget-row">
-            <span class="budget-label">${escapeHtml(budget.action_type)}</span>
-            <div class="budget-track">
-              <div class="budget-fill ${fillClass} ${pct === 0 ? "empty" : ""}" style="width:${pct}%"></div>
-            </div>
-            <span class="budget-num">${budget.remaining}/${budget.max}</span>
+          <div class="quota-pill">
+            <div class="label">${escapeHtml(budgetLabel(budget.action_type))}</div>
+            <div class="value">${escapeHtml(`${budget.remaining}/${budget.max}`)}</div>
+            <div class="meta">已用 ${escapeHtml(budget.used)}</div>
           </div>
         `;
       }
 
-      function renderFollowerSparkline(history) {
+      function renderFollowerSparkline(history, options = {}) {
         if (!history || !history.length) {
           return '<p style="font-size:11px; color:var(--text-muted); margin-top:6px;">暂无粉丝历史</p>';
         }
         if (history.length === 1) {
           return `<p style="font-size:11px; color:var(--text-muted); margin-top:6px;">1个采样: ${escapeHtml(history[0].snapshot_date)} · ${escapeHtml(history[0].follower_count)}</p>`;
         }
-        const W = 300, H = 48, P = 4;
+        const W = options.width || 300;
+        const H = options.height || 48;
+        const P = 4;
+        const gradientId = `sg-${String(options.gradientId || "default").replace(/[^a-z0-9_-]/gi, "-")}`;
         const counts = history.map(h => h.follower_count);
         const min = Math.min(...counts), max = Math.max(...counts);
         const span = Math.max(max - min, 1);
@@ -453,14 +688,14 @@ targets:
           return `${x.toFixed(1)},${y.toFixed(1)}`;
         }).join(" ");
         return `
-          <svg class="sparkline-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:48px;">
+          <svg class="sparkline-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px;">
             <defs>
-              <linearGradient id="sg" x1="0" y1="0" x2="1" y2="0">
+              <linearGradient id="${gradientId}" x1="0" y1="0" x2="1" y2="0">
                 <stop offset="0%" stop-color="#6c8cff"/>
                 <stop offset="100%" stop-color="#34d399"/>
               </linearGradient>
             </defs>
-            <polyline fill="none" stroke="url(#sg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${points}"></polyline>
+            <polyline fill="none" stroke="url(#${gradientId})" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" points="${points}"></polyline>
           </svg>
           <p style="font-size:11px; color:var(--text-muted);">${escapeHtml(history[0].snapshot_date)} → ${escapeHtml(history[history.length-1].snapshot_date)}</p>
         `;
@@ -469,66 +704,96 @@ targets:
       function accountCard(account) {
         const disabledRuntime = account.lifecycle_status !== "enabled";
         const followerCount = account.follower_count == null ? "n/a" : account.follower_count;
-        const followerDelta = account.follower_delta == null ? "暂无对比" :
-          `${account.follower_delta >= 0 ? "+" : ""}${account.follower_delta}`;
+        const followerDelta = formatFollowerDelta(account);
         const fetchSchedule = account.fetch_schedule || {};
         const quietHours = fetchSchedule.quiet_hours
           ? `${fetchSchedule.quiet_hours[0]}-${fetchSchedule.quiet_hours[1]}`
           : "off";
-        const barHtml = account.budgets.map(renderBudgetRow).join("");
+        const budgetHtml = account.budgets.map(renderQuotaCard).join("");
+        const showModeToggle = account.lifecycle_status === "enabled";
+        const isReadOnly = account.execution_mode === "read_only";
+        const isLive = account.execution_mode === "live";
+        const nextActionText = formatNextAction(account);
+        const nextActionAttrs = !isReadOnly && !disabledRuntime && Number(account.next_action_in_seconds || 0) > 0
+          ? ` data-next-action="${account.next_action_in_seconds}"`
+          : "";
         return `
           <div class="account-card">
             <div class="account-card-head">
-              <div>
+              <a class="account-entry" href="/console/accounts/${encodeURIComponent(account.id)}" aria-label="查看 ${escapeHtml(account.twitter_handle)} 账号详情">
                 <div class="account-name">${escapeHtml(account.twitter_handle)}</div>
-                <div class="account-meta">${escapeHtml(account.id)} · ${escapeHtml(account.persona_name || "")}</div>
-              </div>
-              <div class="account-actions">
-                <a class="chip accent" href="/console/accounts/${encodeURIComponent(account.id)}">详情 →</a>
-                <button class="ghost" data-validate-account="${escapeHtml(account.id)}">校验</button>
-                <button class="secondary" data-fetch-account="${escapeHtml(account.id)}" ${disabledRuntime ? "disabled" : ""}>抓取</button>
-                <button class="${account.lifecycle_status === "enabled" ? "ghost" : "secondary"}"
-                  data-toggle-account="${escapeHtml(account.id)}"
-                  data-next-state="${account.lifecycle_status === "enabled" ? "disable" : "enable"}">
-                  ${account.lifecycle_status === "enabled" ? "停用" : "启用"}
-                </button>
+                <div class="account-meta">${escapeHtml(account.id)} · ${escapeHtml(account.persona_name || "")}${account.group_name ? ` · 分组 ${escapeHtml(account.group_name)}` : ""}</div>
+              </a>
+              <div class="account-controls">
+                <div class="account-actions">
+                  <button class="ghost" data-validate-account="${escapeHtml(account.id)}">校验</button>
+                  <button class="secondary" data-fetch-account="${escapeHtml(account.id)}" ${disabledRuntime ? "disabled" : ""}>抓取</button>
+                  <button class="${account.lifecycle_status === "enabled" ? "ghost" : "secondary"}"
+                    data-toggle-account="${escapeHtml(account.id)}"
+                    data-next-state="${account.lifecycle_status === "enabled" ? "disable" : "enable"}">
+                    ${account.lifecycle_status === "enabled" ? "停用" : "启用"}
+                  </button>
+                </div>
+                ${showModeToggle ? `
+                  <div class="toggle-group mode-toggle" role="tablist" aria-label="${escapeHtml(account.id)} execution mode">
+                    <button
+                      type="button"
+                      class="toggle-option ${isReadOnly ? "active" : ""}"
+                      role="tab"
+                      aria-selected="${isReadOnly ? "true" : "false"}"
+                      data-account-id="${escapeHtml(account.id)}"
+                      data-set-execution-mode="read_only"
+                    >
+                      只读
+                    </button>
+                    <button
+                      type="button"
+                      class="toggle-option ${isLive ? "active" : ""}"
+                      role="tab"
+                      aria-selected="${isLive ? "true" : "false"}"
+                      data-account-id="${escapeHtml(account.id)}"
+                      data-set-execution-mode="live"
+                    >
+                      Live
+                    </button>
+                  </div>
+                ` : ""}
               </div>
             </div>
 
             <div class="chip-row">
               <span class="chip ${chipClass(account.lifecycle_status)}">${escapeHtml(account.lifecycle_status)}</span>
-              <span class="chip">mode: ${escapeHtml(account.execution_mode)}</span>
               <span class="chip ${chipClass(account.cookie_freshness)}">cookie: ${escapeHtml(account.cookie_freshness)}</span>
               <span class="chip ${chipClass(account.proxy_health)}">proxy: ${escapeHtml(account.proxy_health)}</span>
+              ${account.group_name ? `<span class="chip">group: ${escapeHtml(account.group_name)}</span>` : ""}
               ${account.pause_reason && account.pause_reason !== "none" ? `<span class="chip ${chipClass(account.pause_reason)}">pause: ${escapeHtml(account.pause_reason)}</span>` : ""}
             </div>
 
             <div class="stat-grid">
               <div class="stat-pill"><div class="label">推文数</div><div class="value">${escapeHtml(account.tweet_count)}</div></div>
               <div class="stat-pill"><div class="label">粉丝数</div><div class="value">${escapeHtml(followerCount)}</div></div>
-              <div class="stat-pill"><div class="label">粉丝变化</div><div class="value">${escapeHtml(followerDelta)}</div></div>
+              <div class="stat-pill">
+                <div class="label">
+                  <button type="button" class="stat-pill-trigger" data-open-follower-trend="${escapeHtml(account.id)}" aria-haspopup="dialog" aria-controls="follower-trend-modal">
+                    粉丝变化
+                  </button>
+                </div>
+                <div class="value">${escapeHtml(followerDelta)}</div>
+              </div>
               <div class="stat-pill"><div class="label">连续失败</div><div class="value">${escapeHtml(account.failure_streak)}</div></div>
               <div class="stat-pill"><div class="label">额度重置</div><div class="value" data-daily-reset="${account.daily_reset_in_seconds}">${formatDuration(account.daily_reset_in_seconds)}</div></div>
-              <div class="stat-pill"><div class="label">下次可动作</div><div class="value" data-next-action="${account.next_action_in_seconds}">${formatDuration(account.next_action_in_seconds)}</div></div>
-            </div>
-
-            <div class="sparkline-wrap">
-              <div class="sparkline-header">
-                <span>粉丝变化趋势</span>
-                <span class="sparkline-delta">${escapeHtml(followerDelta)}</span>
-              </div>
-              ${renderFollowerSparkline(account.follower_history || [])}
+              <div class="stat-pill"><div class="label">下次可动作</div><div class="value"${nextActionAttrs}>${escapeHtml(nextActionText)}</div></div>
             </div>
 
             <div style="margin-top:12px;">
               <div style="font-size:10.5px; text-transform:uppercase; letter-spacing:0.07em; color:var(--text-muted); margin-bottom:5px;">今日配额</div>
-              <div class="budget-list">${barHtml}</div>
+              <div class="quota-grid">${budgetHtml}</div>
             </div>
 
             <div class="chip-row" style="margin-top:10px;">
               <span class="chip">抓取: 每 ${escapeHtml(fetchSchedule.base_interval_minutes || 0)}m ±${escapeHtml(fetchSchedule.interval_jitter_minutes || 0)}m</span>
               <span class="chip">静默: ${escapeHtml(quietHours)}</span>
-              <span class="chip">上次抓取: ${escapeHtml(formatDate(account.last_fetch_finished_at))}</span>
+              <span class="chip" data-last-fetch="${escapeHtml(account.last_fetch_finished_at || "")}">上次抓取: ${escapeHtml(formatRelativeElapsed(account.last_fetch_finished_at))}</span>
               <span class="chip">最新推文: ${escapeHtml(formatDate(account.latest_tweet_at))}</span>
             </div>
 
@@ -539,6 +804,27 @@ targets:
             ` : ""}
           </div>
         `;
+      }
+
+      function renderFollowerTrendModal(account) {
+        if (!account) return;
+        const history = account.follower_history || [];
+        const followerDelta = formatFollowerDelta(account);
+        const deltaClass = account.follower_delta == null
+          ? ""
+          : account.follower_delta >= 0 ? "ok" : "warn";
+        followerTrendTitle.textContent = `${account.twitter_handle} · 粉丝变化趋势`;
+        followerTrendSubtitle.textContent = `${account.id} 最近 ${history.length || 0} 个采样点`;
+        followerTrendSummary.innerHTML = `
+          <span class="chip">当前粉丝: ${escapeHtml(account.follower_count ?? "n/a")}</span>
+          <span class="chip ${deltaClass}">变化: ${escapeHtml(followerDelta)}</span>
+          <span class="chip">最近采样: ${escapeHtml(history.length ? history[history.length - 1].snapshot_date : "n/a")}</span>
+        `;
+        followerTrendContent.innerHTML = renderFollowerSparkline(history, {
+          width: 720,
+          height: 180,
+          gradientId: account.id,
+        });
       }
 
       function renderAccounts(accounts) {
@@ -569,6 +855,25 @@ targets:
         `).join("");
       }
 
+      function renderFetchQueue(items) {
+        if (!items || !items.length) {
+          fetchQueueList.innerHTML = '<div class="empty-state" style="margin: 14px 0;">当前没有等待中的抓取任务。</div>';
+          return;
+        }
+        fetchQueueList.innerHTML = items.map(item => `
+          <div class="op-row">
+            <div class="op-dot warn"></div>
+            <div class="op-content">
+              <div class="op-title">#${escapeHtml(item.position)} · ${escapeHtml(item.twitter_handle || item.account_id)}</div>
+              <div class="op-detail">
+                <span class="chip">account: ${escapeHtml(item.account_id)}</span>
+                ${item.lifecycle_status ? `<span class="chip ${chipClass(item.lifecycle_status)}">${escapeHtml(item.lifecycle_status)}</span>` : ""}
+              </div>
+            </div>
+          </div>
+        `).join("");
+      }
+
       // ── API ────────────────────────────────────
       async function fetchJson(url, options = {}) {
         const response = await fetch(url, {
@@ -592,6 +897,7 @@ targets:
         renderRuntimeSettings(dashboard.runtime_settings);
         renderAccounts(state.accounts);
         renderOperations(dashboard.recent_operations || []);
+        renderFetchQueue(dashboard.fetch_queue || []);
         startCountdowns();
       }
 
@@ -614,7 +920,10 @@ targets:
           document.querySelectorAll("[data-next-action]").forEach(node => {
             const next = Math.max(0, Number(node.dataset.nextAction || "0") - 1);
             node.dataset.nextAction = String(next);
-            node.textContent = formatDuration(next);
+            node.textContent = next <= 0 ? "现在" : formatDuration(next);
+          });
+          document.querySelectorAll("[data-last-fetch]").forEach(node => {
+            node.textContent = `上次抓取: ${formatRelativeElapsed(node.dataset.lastFetch)}`;
           });
         }, 1000);
       }
@@ -655,11 +964,18 @@ targets:
       accountsList.addEventListener("click", async (event) => {
         const target = event.target.closest("button");
         if (!target) return;
+        const trendId = target.dataset.openFollowerTrend;
         const validateId = target.dataset.validateAccount;
         const fetchId    = target.dataset.fetchAccount;
         const toggleId   = target.dataset.toggleAccount;
+        const modeId     = target.dataset.accountId;
+        const nextMode   = target.dataset.setExecutionMode;
         try {
-          if (validateId) {
+          if (trendId) {
+            const account = state.accounts.find(item => item.id === trendId);
+            renderFollowerTrendModal(account);
+            openModal("follower-trend-modal", target);
+          } else if (validateId) {
             setStatus(`正在校验 ${validateId} 会话...`);
             const r = await fetchJson(`/admin/accounts/${encodeURIComponent(validateId)}/validate-session`, { method: "POST" });
             await loadDashboard();
@@ -667,6 +983,7 @@ targets:
           } else if (fetchId) {
             setStatus(`正在为 ${fetchId} 入队抓取...`);
             const r = await fetchJson(`/admin/accounts/${encodeURIComponent(fetchId)}/fetch-now`, { method: "POST" });
+            await loadDashboard();
             setStatus(`${fetchId}: ${r.enqueued ? "已入队" : r.detail || "未入队"}`, r.enqueued ? "ok" : "warn");
           } else if (toggleId) {
             const nextState = target.dataset.nextState;
@@ -674,6 +991,15 @@ targets:
             await fetchJson(`/admin/accounts/${encodeURIComponent(toggleId)}/${nextState}`, { method: "POST" });
             await loadDashboard();
             setStatus(`${toggleId} 已${nextState === "disable" ? "停用" : "启用"}`, "ok");
+          } else if (modeId && nextMode) {
+            if (target.classList.contains("active")) return;
+            setStatus(`正在切换 ${modeId} 的 execution_mode...`);
+            await fetchJson(`/admin/accounts/${encodeURIComponent(modeId)}/execution-mode`, {
+              method: "PUT",
+              body: JSON.stringify({ execution_mode: nextMode }),
+            });
+            await loadDashboard();
+            setStatus(`${modeId} execution_mode 已切到 ${nextMode}`, "ok");
           }
         } catch (e) { setStatus(`操作失败: ${e.message}`, "bad"); }
       });

@@ -12,6 +12,7 @@ TWEETS_PAGE = UI_DIR / "tweets.html"
 AI_PAGE = UI_DIR / "ai.html"
 AI_LOGS_PAGE = UI_DIR / "ai_logs.html"
 ACCOUNT_PAGE = UI_DIR / "account.html"
+GROUPS_PAGE = UI_DIR / "groups.html"
 REPLIES_PAGE = UI_DIR / "replies.html"
 
 
@@ -38,6 +39,11 @@ async def console_ai() -> FileResponse:
 @router.get("/console/ai/logs", include_in_schema=False)
 async def console_ai_logs() -> FileResponse:
     return FileResponse(AI_LOGS_PAGE)
+
+
+@router.get("/console/groups", include_in_schema=False)
+async def console_groups() -> FileResponse:
+    return FileResponse(GROUPS_PAGE)
 
 
 @router.get("/console/accounts/{account_id}", include_in_schema=False)

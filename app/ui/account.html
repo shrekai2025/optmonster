@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OptMonster · 账号详情</title>
-    <link rel="stylesheet" href="/ui/theme.css" />
+    <link rel="stylesheet" href="/ui/theme.css?v=20260316b" />
     <style>
       /* Page-specific overrides */
       .content-grid {
@@ -17,6 +17,38 @@
 
       .stack { display: grid; gap: 20px; }
       .section-split { display: grid; gap: 12px; }
+      .inherit-note {
+        padding: 12px 14px;
+        border-radius: var(--radius-md);
+        border: 1px solid rgba(96, 165, 250, 0.28);
+        background: rgba(59, 130, 246, 0.1);
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+      .inherit-note strong { color: var(--text-primary); }
+      .inherit-note code {
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: rgba(15, 23, 42, 0.1);
+        color: var(--text-primary);
+      }
+      .field-lock {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 8px;
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+      .disabled-section {
+        opacity: 0.72;
+      }
+      .disabled-section textarea,
+      .disabled-section input,
+      .disabled-section select {
+        cursor: not-allowed;
+      }
 
       .empty { padding: 16px; border-radius: var(--radius-md); border: 1px dashed var(--border-medium); color: var(--text-muted); background: var(--bg-elevated); }
 
@@ -60,6 +92,7 @@
       <span class="topnav-brand">Opt<span>Monster</span></span>
       <div class="topnav-divider"></div>
       <a href="/console">账号总览</a>
+      <a href="/console/groups">账号分组</a>
       <a href="/console/tweets">推文工作台</a>
       <a href="/console/replies">回复处理</a>
       <a href="/console/ai">AI 设置</a>
@@ -170,6 +203,7 @@
       const state = {
         config: null,
         summary: null,
+        groups: [],
         timezone: "UTC",
       };
 
@@ -178,6 +212,7 @@
         "twitter_handle": ["账号在 X 上的公开 handle，用于展示、自身识别和避免自关注。", "保存后立即热重载；后续抓取/动作直接使用新值，无需重启。"],
         "enabled": ["配置层默认开关，关闭后该账号默认不参与新的抓取和动作。", "保存后立即热重载；新任务立刻受影响，无需重启。"],
         "execution_mode": ["控制写侧模式：read_only / dry_run / live。", "保存后立即热重载；后续新动作按新模式执行，无需重启。"],
+        "group_id": ["账号所属分组。设置后，这个账号会继承分组统一定义的 persona 和 targets。", "保存后立即热重载；保存成功后，分组配置会接管任务目标与抓取范围。"],
         "cookie_file": ["登录 cookie 文件路径，决定会话凭证从哪里读取。", "保存后立即热重载；下次校验会话或抓取时生效，无需重启。"],
         "proxy.enabled": ["决定当前账号是否启用代理。", "保存后立即热重载；下次网络请求开始生效，无需重启。"],
         "proxy.url": ["代理地址，支持带认证信息。", "保存后立即热重载；下次抓取/校验会话开始生效，无需重启。"],
@@ -189,7 +224,9 @@
         "persona.tone": ["语气风格描述。", "保存后立即热重载；后续 AI 生成立刻生效，无需重启。"],
         "persona.reply_style": ["回复写作偏好，如长度、结构、是否提问。", "保存后立即热重载；后续 AI 回复立刻生效，无需重启。"],
         "persona.forbidden_topics": ["禁止 AI 主动触碰的话题列表。", "保存后立即热重载；后续 AI 生成立刻生效，无需重启。"],
-        "targets.timeline": ["是否启用首页时间线渠道。", "保存后立即热重载；下一轮抓取开始生效，无需重启。"],
+        "targets.timeline": ["是否启用首页 Following 时间线渠道，不包含推荐流。", "保存后立即热重载；下一轮抓取开始生效，无需重启。"],
+        "targets.timeline_popular": ["是否启用热门推文渠道。该渠道会读取首页 For You，并只保留达到热门阈值的推文。", "热门阈值在 AI 设置页里统一配置；保存后下一轮抓取开始生效。"],
+        "targets.timeline_recommended": ["是否启用首页推荐 For You 渠道。", "保存后立即热重载；下一轮抓取开始生效，无需重启。"],
         "targets.follow_users_enabled": ["是否启用“关注账号列表”渠道。关闭后会保留列表内容，但不再抓取这些账号。", "保存后立即热重载；下一轮抓取开始生效，无需重启。"],
         "targets.follow_users": ["指定要持续观察的账号列表及每次抓取条数。", "保存后立即热重载；下一轮抓取开始生效，无需重启。"],
         "targets.search_keywords_enabled": ["是否启用“关键词搜索”渠道。关闭后会保留关键词列表，但不再抓取。", "保存后立即热重载；下一轮抓取开始生效，无需重启。"],
@@ -470,16 +507,43 @@
           .join("");
       }
 
+      function renderGroupOptions(selectedGroupId) {
+        const options = ['<option value="">无分组（账号独立管理）</option>'];
+        for (const group of state.groups || []) {
+          const selected = selectedGroupId === group.id ? "selected" : "";
+          options.push(
+            `<option value="${escapeHtml(group.id)}" ${selected}>${escapeHtml(group.name)} · ${escapeHtml(group.id)}</option>`
+          );
+        }
+        return options.join("");
+      }
+
+      function renderInheritanceNote(configDoc, kind) {
+        const groupName = configDoc.group_name || configDoc.account.group_id;
+        if (!groupName) return "";
+        const topic = kind === "persona" ? "任务目标 / Persona" : "抓取范围 / Targets";
+        return `
+          <div class="inherit-note">
+            <strong>${escapeHtml(topic)}</strong> 当前由分组 <code>${escapeHtml(groupName)}</code> 统一管理。
+            如需改这部分配置，请前往 <a href="/console/groups">账号分组</a> 页面编辑该分组，保存后组内账号会一起生效。
+          </div>
+        `;
+      }
+
       function renderSummary(summary, configDoc) {
         const account = configDoc.account;
         pageTitle.textContent = `${account.twitter_handle} · 账号详情`;
-        pageSubtitle.textContent = `${account.id} 的完整配置、运行指标和最近行为日志。来源: ${configDoc.source_file} · 当前时区: ${state.timezone}`;
+        const groupSummary = account.group_id
+          ? ` · 分组: ${configDoc.group_name || account.group_id}（persona / targets 继承）`
+          : "";
+        pageSubtitle.textContent = `${account.id} 的完整配置、运行指标和最近行为日志。来源: ${configDoc.source_file} · 当前时区: ${state.timezone}${groupSummary}`;
         const followerCount = summary.follower_count ?? "n/a";
         summaryGrid.innerHTML = [
           ["运行状态", summary.lifecycle_status],
           ["推文数", summary.tweet_count],
           ["粉丝数", followerCount],
           ["写侧模式", account.execution_mode],
+          ["所属分组", configDoc.group_name || account.group_id || "独立"],
           ["最近抓取", formatDate(summary.last_fetch_finished_at)],
           ["下次可动作", formatDuration(summary.next_action_in_seconds)],
         ]
@@ -524,6 +588,13 @@
               </select>
               ${renderHint("execution_mode")}
             </div>
+            <div class="field">
+              <label for="field-group-id">group_id</label>
+              <select id="field-group-id">
+                ${renderGroupOptions(account.group_id)}
+              </select>
+              ${renderHint("group_id")}
+            </div>
             <div class="field full">
               <label for="field-cookie">cookie_file</label>
               <input id="field-cookie" value="${escapeHtml(account.cookie_file)}" />
@@ -556,60 +627,76 @@
         `;
 
         personaForm.innerHTML = `
-          <div class="form-grid">
+          ${configDoc.inherits_persona_from_group ? renderInheritanceNote(configDoc, "persona") : ""}
+          <div class="form-grid ${configDoc.inherits_persona_from_group ? "disabled-section" : ""}">
             <div class="field">
-              <label for="field-persona-name">persona.name</label>
-              <input id="field-persona-name" value="${escapeHtml(account.persona.name)}" />
+              <label for="field-persona-name">persona.name ${configDoc.inherits_persona_from_group ? '<span class="field-lock">分组接管</span>' : ""}</label>
+              <input id="field-persona-name" value="${escapeHtml(account.persona.name)}" ${configDoc.inherits_persona_from_group ? "disabled" : ""} />
               ${renderHint("persona.name")}
             </div>
             <div class="field">
               <label for="field-persona-language">persona.language</label>
-              <input id="field-persona-language" value="${escapeHtml(account.persona.language)}" />
+              <input id="field-persona-language" value="${escapeHtml(account.persona.language)}" ${configDoc.inherits_persona_from_group ? "disabled" : ""} />
               ${renderHint("persona.language")}
             </div>
             <div class="field full">
               <label for="field-persona-role">persona.role</label>
-              <textarea id="field-persona-role">${escapeHtml(account.persona.role)}</textarea>
+              <textarea id="field-persona-role" ${configDoc.inherits_persona_from_group ? "disabled" : ""}>${escapeHtml(account.persona.role)}</textarea>
               ${renderHint("persona.role")}
             </div>
             <div class="field full">
               <label for="field-persona-tone">persona.tone</label>
-              <textarea id="field-persona-tone">${escapeHtml(account.persona.tone)}</textarea>
+              <textarea id="field-persona-tone" ${configDoc.inherits_persona_from_group ? "disabled" : ""}>${escapeHtml(account.persona.tone)}</textarea>
               ${renderHint("persona.tone")}
             </div>
             <div class="field full">
               <label for="field-persona-style">persona.reply_style</label>
-              <textarea id="field-persona-style">${escapeHtml(account.persona.reply_style)}</textarea>
+              <textarea id="field-persona-style" ${configDoc.inherits_persona_from_group ? "disabled" : ""}>${escapeHtml(account.persona.reply_style)}</textarea>
               ${renderHint("persona.reply_style")}
             </div>
             <div class="field full">
               <label for="field-forbidden">persona.forbidden_topics (每行一个)</label>
-              <textarea id="field-forbidden">${escapeHtml((account.persona.forbidden_topics || []).join("\n"))}</textarea>
+              <textarea id="field-forbidden" ${configDoc.inherits_persona_from_group ? "disabled" : ""}>${escapeHtml((account.persona.forbidden_topics || []).join("\n"))}</textarea>
               ${renderHint("persona.forbidden_topics")}
             </div>
           </div>
         `;
 
         targetsForm.innerHTML = `
-          <div class="form-grid">
+          ${configDoc.inherits_targets_from_group ? renderInheritanceNote(configDoc, "targets") : ""}
+          <div class="form-grid ${configDoc.inherits_targets_from_group ? "disabled-section" : ""}">
             <div class="field full">
               <label class="inline" for="field-timeline">
-                <input id="field-timeline" type="checkbox" ${account.targets.timeline ? "checked" : ""} />
-                targets.timeline
+                <input id="field-timeline" type="checkbox" ${account.targets.timeline ? "checked" : ""} ${configDoc.inherits_targets_from_group ? "disabled" : ""} />
+                <span class="inline-label-text">targets.timeline (Following)</span>
               </label>
               ${renderHint("targets.timeline")}
             </div>
             <div class="field full">
+              <label class="inline" for="field-timeline-popular">
+                <input id="field-timeline-popular" type="checkbox" ${account.targets.timeline_popular ? "checked" : ""} ${configDoc.inherits_targets_from_group ? "disabled" : ""} />
+                <span class="inline-label-text">targets.timeline_popular (Hot / Viral)</span>
+              </label>
+              ${renderHint("targets.timeline_popular")}
+            </div>
+            <div class="field full">
+              <label class="inline" for="field-timeline-recommended">
+                <input id="field-timeline-recommended" type="checkbox" ${account.targets.timeline_recommended ? "checked" : ""} ${configDoc.inherits_targets_from_group ? "disabled" : ""} />
+                <span class="inline-label-text">targets.timeline_recommended (For You)</span>
+              </label>
+              ${renderHint("targets.timeline_recommended")}
+            </div>
+            <div class="field full">
               <label class="inline" for="field-follow-users-enabled">
-                <input id="field-follow-users-enabled" type="checkbox" ${account.targets.follow_users_enabled !== false ? "checked" : ""} />
-                targets.follow_users_enabled
+                <input id="field-follow-users-enabled" type="checkbox" ${account.targets.follow_users_enabled !== false ? "checked" : ""} ${configDoc.inherits_targets_from_group ? "disabled" : ""} />
+                <span class="inline-label-text">targets.follow_users_enabled</span>
               </label>
               ${renderHint("targets.follow_users_enabled")}
             </div>
             <div class="field full">
               <label class="inline" for="field-search-keywords-enabled">
-                <input id="field-search-keywords-enabled" type="checkbox" ${account.targets.search_keywords_enabled !== false ? "checked" : ""} />
-                targets.search_keywords_enabled
+                <input id="field-search-keywords-enabled" type="checkbox" ${account.targets.search_keywords_enabled !== false ? "checked" : ""} ${configDoc.inherits_targets_from_group ? "disabled" : ""} />
+                <span class="inline-label-text">targets.search_keywords_enabled</span>
               </label>
               ${renderHint("targets.search_keywords_enabled")}
             </div>
@@ -669,12 +756,12 @@
             </div>
             <div class="field full">
               <label for="field-follow-users">targets.follow_users (每行 @handle,count)</label>
-              <textarea id="field-follow-users">${escapeHtml((account.targets.follow_users || []).map((item) => `${item.handle},${item.count}`).join("\n"))}</textarea>
+              <textarea id="field-follow-users" ${configDoc.inherits_targets_from_group ? "disabled" : ""}>${escapeHtml((account.targets.follow_users || []).map((item) => `${item.handle},${item.count}`).join("\n"))}</textarea>
               ${renderHint("targets.follow_users")}
             </div>
             <div class="field full">
               <label for="field-keywords">targets.search_keywords (每行 query,count)</label>
-              <textarea id="field-keywords">${escapeHtml((account.targets.search_keywords || []).map((item) => `${item.query},${item.count}`).join("\n"))}</textarea>
+              <textarea id="field-keywords" ${configDoc.inherits_targets_from_group ? "disabled" : ""}>${escapeHtml((account.targets.search_keywords || []).map((item) => `${item.query},${item.count}`).join("\n"))}</textarea>
               ${renderHint("targets.search_keywords")}
             </div>
           </div>
@@ -720,12 +807,14 @@
       function buildPayload() {
         const quietStart = document.getElementById("field-quiet-start").value.trim();
         const quietEnd = document.getElementById("field-quiet-end").value.trim();
+        const groupId = document.getElementById("field-group-id").value.trim();
         return {
           id: document.getElementById("field-id").value.trim(),
           twitter_handle: document.getElementById("field-handle").value.trim(),
           enabled: document.getElementById("field-enabled").value === "true",
           execution_mode: document.getElementById("field-mode").value,
           cookie_file: document.getElementById("field-cookie").value.trim(),
+          group_id: groupId || null,
           proxy: document.getElementById("field-proxy-url").value.trim()
             ? {
                 enabled: document.getElementById("field-proxy-enabled").value === "true",
@@ -735,6 +824,8 @@
             : null,
           targets: {
             timeline: document.getElementById("field-timeline").checked,
+            timeline_popular: document.getElementById("field-timeline-popular").checked,
+            timeline_recommended: document.getElementById("field-timeline-recommended").checked,
             follow_users_enabled: document.getElementById("field-follow-users-enabled").checked,
             follow_users: parseLinePairs(document.getElementById("field-follow-users").value, "handle"),
             search_keywords_enabled: document.getElementById("field-search-keywords-enabled").checked,
@@ -768,11 +859,13 @@
       }
 
       async function loadPage() {
-        const [configDoc, dashboard] = await Promise.all([
+        const [configDoc, dashboard, groups] = await Promise.all([
           fetchJson(`/admin/accounts/${encodeURIComponent(accountId)}/config`),
           fetchJson("/admin/dashboard"),
+          fetchJson("/admin/groups"),
         ]);
         state.timezone = dashboard.runtime_settings?.app_timezone || "UTC";
+        state.groups = groups || [];
         const summary = (dashboard.accounts || []).find((item) => item.id === configDoc.account.id);
         if (!summary) {
           throw new Error("dashboard 中未找到该账号的运行指标");

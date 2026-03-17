@@ -8,6 +8,13 @@ from app.accounts.schemas import (
     AccountAdminView,
     AccountConfigDocumentView,
     AccountConfigEditView,
+    AccountGroupDeleteResponse,
+    AccountGroupDocumentView,
+    AccountGroupEditView,
+    AccountGroupListItem,
+    AccountGroupUpdateResult,
+    AccountExecutionModeUpdateRequest,
+    AccountExecutionModeUpdateResult,
     AccountConfigUpdateResult,
     AccountDeleteResponse,
     AccountStateChangeResponse,
@@ -22,6 +29,7 @@ from app.accounts.schemas import (
     RuntimeSettingsUpdateResult,
     RuntimeSettingsView,
     TweetBackfillResult,
+    TweetClearResult,
     TweetCleanupResult,
     TweetDetailView,
     TweetListItem,
@@ -63,6 +71,82 @@ async def list_accounts(container: ContainerDep) -> list[AccountAdminView]:
     return await container.account_service.list_accounts(
         fetch_limit_default=container.settings.fetch_limit_default
     )
+
+
+@router.get("/groups", response_model=list[AccountGroupListItem])
+async def list_groups(container: ContainerDep) -> list[AccountGroupListItem]:
+    return await container.account_service.list_groups()
+
+
+@router.post(
+    "/groups",
+    response_model=AccountGroupUpdateResult,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_group(
+    payload: AccountGroupEditView,
+    container: ContainerDep,
+) -> AccountGroupUpdateResult:
+    try:
+        return await container.account_service.create_group_config(payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get("/groups/{group_id}", response_model=AccountGroupDocumentView)
+async def get_group_config(
+    group_id: str,
+    container: ContainerDep,
+) -> AccountGroupDocumentView:
+    try:
+        return await container.account_service.get_group_config(group_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="group not found",
+        ) from exc
+
+
+@router.put("/groups/{group_id}", response_model=AccountGroupUpdateResult)
+async def update_group_config(
+    group_id: str,
+    payload: AccountGroupEditView,
+    container: ContainerDep,
+) -> AccountGroupUpdateResult:
+    try:
+        return await container.account_service.update_group_config(group_id, payload)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="group not found",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.delete("/groups/{group_id}", response_model=AccountGroupDeleteResponse)
+async def delete_group_config(
+    group_id: str,
+    container: ContainerDep,
+) -> AccountGroupDeleteResponse:
+    try:
+        return await container.account_service.delete_group_config(group_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="group not found",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/cookie-import/candidates", response_model=list[CookieImportCandidateView])
@@ -114,6 +198,32 @@ async def update_account_config(
 ) -> AccountConfigUpdateResult:
     try:
         return await container.account_service.update_account_config(account_id, payload)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="account not found",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.put(
+    "/accounts/{account_id}/execution-mode",
+    response_model=AccountExecutionModeUpdateResult,
+)
+async def update_account_execution_mode(
+    account_id: str,
+    payload: AccountExecutionModeUpdateRequest,
+    container: ContainerDep,
+) -> AccountExecutionModeUpdateResult:
+    try:
+        return await container.account_service.update_account_execution_mode(
+            account_id,
+            payload.execution_mode,
+        )
     except KeyError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -263,6 +373,20 @@ async def cleanup_tweets(
         ) from exc
 
 
+@router.post("/tweets/clear", response_model=TweetClearResult)
+async def clear_tweets(
+    payload: TweetMaintenanceRequest,
+    container: ContainerDep,
+) -> TweetClearResult:
+    try:
+        return await container.account_service.clear_tweets(account_id=payload.account_id)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="account not found",
+        ) from exc
+
+
 @router.post("/tweets/backfill-ai", response_model=TweetBackfillResult)
 async def backfill_tweet_ai(
     payload: TweetMaintenanceRequest,
@@ -317,13 +441,22 @@ async def add_follow_target_for_tweet_author(
             author_handle,
             default_count=container.settings.fetch_limit_default,
         )
+        scope_owner_type = "group" if updated_config.account.group_id else "account"
+        scope_owner_id = updated_config.account.group_id or updated_config.account.id
+        scope_owner_label = (
+            updated_config.group_name
+            or updated_config.account.group_id
+            or updated_config.account.id
+        )
 
         fetch_enqueued = False
-        detail = "author already in follow scope"
+        detail = (
+            f"author already in {scope_owner_type} follow scope"
+        )
         if added:
             enqueue_result = await container.fetch_service.enqueue_fetch(account_id)
             fetch_enqueued = enqueue_result.enqueued
-            detail = "author added to follow scope"
+            detail = f"author added to {scope_owner_type} follow scope"
             if (
                 updated_config.account.execution_mode != ExecutionMode.READ_ONLY
                 and updated_config.account.enabled
@@ -338,17 +471,20 @@ async def add_follow_target_for_tweet_author(
                     )
                 )
                 detail = (
-                    "author added to follow scope and follow action queued"
+                    f"author added to {scope_owner_type} follow scope and follow action queued"
                     if fetch_enqueued
-                    else "author added to follow scope and follow action created"
+                    else f"author added to {scope_owner_type} follow scope and follow action created"
                 )
             elif fetch_enqueued:
-                detail = "author added to follow scope; next fetch is queued"
+                detail = f"author added to {scope_owner_type} follow scope; next fetch is queued"
 
         return FollowTargetUpdateResponse(
             tweet_record_id=tweet_record_id,
             target_account_id=account_id,
             author_handle=author_handle,
+            scope_owner_type=scope_owner_type,
+            scope_owner_id=scope_owner_id,
+            scope_owner_label=scope_owner_label,
             added_to_follow_scope=added,
             fetch_enqueued=fetch_enqueued,
             detail=detail,

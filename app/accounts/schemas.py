@@ -130,6 +130,8 @@ class TargetsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     timeline: bool = True
+    timeline_popular: bool = False
+    timeline_recommended: bool = False
     follow_users_enabled: bool = True
     search_keywords_enabled: bool = True
     follow_users: list[FollowUserTarget] = Field(default_factory=list)
@@ -191,6 +193,48 @@ class PersonaConfig(BaseModel):
         return normalized
 
 
+class AccountGroupConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    targets: TargetsConfig = Field(default_factory=TargetsConfig)
+    persona: PersonaConfig = Field(default_factory=PersonaConfig)
+    source_file: Path | None = None
+    config_revision: str | None = None
+
+    @field_validator("id")
+    @classmethod
+    def validate_group_id(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("group id cannot be empty")
+        if any(char.isspace() for char in cleaned):
+            raise ValueError("group id cannot contain whitespace")
+        return cleaned
+
+    @field_validator("name")
+    @classmethod
+    def validate_group_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("group name cannot be empty")
+        return cleaned
+
+    def ensure_runtime_fields(
+        self,
+        *,
+        source_file: Path,
+    ) -> AccountGroupConfig:
+        revision = sha256(source_file.read_bytes()).hexdigest()
+        return self.model_copy(
+            update={
+                "source_file": source_file,
+                "config_revision": revision,
+            }
+        )
+
+
 class AccountConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -199,6 +243,7 @@ class AccountConfig(BaseModel):
     enabled: bool = True
     execution_mode: ExecutionMode = ExecutionMode.READ_ONLY
     cookie_file: Path
+    group_id: str | None = None
     proxy: ProxyConfig | None = None
     targets: TargetsConfig = Field(default_factory=TargetsConfig)
     fetch_schedule: FetchScheduleConfig = Field(default_factory=FetchScheduleConfig)
@@ -238,6 +283,15 @@ class AccountConfig(BaseModel):
             self.writing_guide_file = Path(f"config/writing_guides/{self.id}.md")
         return self
 
+    def apply_group(self, group: AccountGroupConfig) -> AccountConfig:
+        return self.model_copy(
+            update={
+                "group_id": group.id,
+                "targets": group.targets.model_copy(deep=True),
+                "persona": group.persona.model_copy(deep=True),
+            }
+        )
+
     def build_fetch_sources(self, default_limit: int) -> list[FetchSourceConfig]:
         sources: list[FetchSourceConfig] = []
         if self.targets.timeline:
@@ -245,6 +299,22 @@ class AccountConfig(BaseModel):
                 FetchSourceConfig(
                     source_type=SourceType.TIMELINE,
                     source_key="home_following",
+                    limit=default_limit,
+                )
+            )
+        if self.targets.timeline_popular:
+            sources.append(
+                FetchSourceConfig(
+                    source_type=SourceType.TIMELINE_POPULAR,
+                    source_key="home_popular",
+                    limit=default_limit,
+                )
+            )
+        if self.targets.timeline_recommended:
+            sources.append(
+                FetchSourceConfig(
+                    source_type=SourceType.TIMELINE_RECOMMENDED,
+                    source_key="home_for_you",
                     limit=default_limit,
                 )
             )
@@ -289,6 +359,8 @@ class AccountAdminView(BaseModel):
     twitter_handle: str
     enabled: bool
     execution_mode: ExecutionMode
+    group_id: str | None = None
+    group_name: str | None = None
     source_file: str
     config_revision: str
     cookie_file: str
@@ -333,6 +405,10 @@ class RuntimeSettingsView(BaseModel):
     fetch_latest_first: bool
     fetch_include_replies: bool
     fetch_include_retweets: bool
+    popular_tweet_min_views: int
+    popular_tweet_min_likes: int
+    popular_tweet_min_retweets: int
+    popular_tweet_min_replies: int
     llm_provider: LLMProvider
     llm_base_url: str | None
     llm_model_id: str | None
@@ -346,6 +422,10 @@ class RuntimeSettingsUpdateRequest(BaseModel):
     fetch_latest_first: bool = True
     fetch_include_replies: bool = True
     fetch_include_retweets: bool = True
+    popular_tweet_min_views: int = Field(default=100000, ge=0, le=1_000_000_000)
+    popular_tweet_min_likes: int = Field(default=500, ge=0, le=1_000_000_000)
+    popular_tweet_min_retweets: int = Field(default=50, ge=0, le=1_000_000_000)
+    popular_tweet_min_replies: int = Field(default=20, ge=0, le=1_000_000_000)
     llm_provider: LLMProvider
     llm_base_url: str | None = None
     llm_model_id: str | None = None
@@ -369,6 +449,8 @@ class AccountDashboardItem(BaseModel):
     twitter_handle: str
     enabled: bool
     execution_mode: ExecutionMode
+    group_id: str | None = None
+    group_name: str | None = None
     persona_name: str
     writing_guide_file: str
     fetch_schedule: FetchScheduleConfig
@@ -400,11 +482,19 @@ class OperationLogView(BaseModel):
     created_at: datetime
 
 
+class FetchQueueItemView(BaseModel):
+    account_id: str
+    twitter_handle: str | None = None
+    lifecycle_status: AccountLifecycleStatus | None = None
+    position: int
+
+
 class DashboardView(BaseModel):
     summary: DashboardSummary
     runtime_settings: RuntimeSettingsView
     accounts: list[AccountDashboardItem]
     recent_operations: list[OperationLogView]
+    fetch_queue: list[FetchQueueItemView] = Field(default_factory=list)
 
 
 class TweetActionSummary(BaseModel):
@@ -453,6 +543,10 @@ class TweetListItem(BaseModel):
     author_handle: str | None
     text: str
     lang: str | None
+    view_count: int | None = None
+    like_count: int | None = None
+    retweet_count: int | None = None
+    reply_count: int | None = None
     created_at_twitter: datetime | None
     fetched_at: datetime
     tweet_url: str
@@ -484,6 +578,13 @@ class TweetCleanupResult(BaseModel):
     deleted_disabled_scope_tweets: int = 0
 
 
+class TweetClearResult(BaseModel):
+    account_id: str | None = None
+    deleted_tweets: int
+    deleted_ai_logs: int
+    deleted_actions: int
+
+
 class TweetBackfillResult(BaseModel):
     account_id: str | None = None
     candidate_tweets: int
@@ -497,6 +598,7 @@ class AccountConfigEditView(BaseModel):
     enabled: bool
     execution_mode: ExecutionMode
     cookie_file: str
+    group_id: str | None = None
     proxy: ProxyConfig | None = None
     targets: TargetsConfig
     fetch_schedule: FetchScheduleConfig
@@ -507,6 +609,9 @@ class AccountConfigEditView(BaseModel):
 
 class AccountConfigDocumentView(BaseModel):
     account: AccountConfigEditView
+    group_name: str | None = None
+    inherits_targets_from_group: bool = False
+    inherits_persona_from_group: bool = False
     source_file: str
     config_revision: str
     lifecycle_status: AccountLifecycleStatus
@@ -533,6 +638,50 @@ class AccountConfigUpdateResult(BaseModel):
     reload_summary: ReloadSummary
 
 
+class AccountGroupEditView(BaseModel):
+    id: str
+    name: str
+    targets: TargetsConfig
+    persona: PersonaConfig
+
+
+class AccountGroupListItem(BaseModel):
+    id: str
+    name: str
+    source_file: str
+    config_revision: str
+    member_account_ids: list[str] = Field(default_factory=list)
+    member_count: int = 0
+
+
+class AccountGroupDocumentView(BaseModel):
+    group: AccountGroupEditView
+    source_file: str
+    config_revision: str
+    member_account_ids: list[str] = Field(default_factory=list)
+
+
+class AccountGroupUpdateResult(BaseModel):
+    group: AccountGroupDocumentView
+    reload_summary: ReloadSummary
+
+
+class AccountGroupDeleteResponse(BaseModel):
+    group_id: str
+    deleted_config_file: bool
+    reload_summary: ReloadSummary
+
+
+class AccountExecutionModeUpdateRequest(BaseModel):
+    execution_mode: Literal[ExecutionMode.READ_ONLY, ExecutionMode.LIVE]
+
+
+class AccountExecutionModeUpdateResult(BaseModel):
+    account_id: str
+    execution_mode: ExecutionMode
+    reload_summary: ReloadSummary
+
+
 class FetchEnqueueResponse(BaseModel):
     account_id: str
     enqueued: bool
@@ -549,6 +698,9 @@ class FollowTargetUpdateResponse(BaseModel):
     tweet_record_id: int
     target_account_id: str
     author_handle: str
+    scope_owner_type: Literal["account", "group"]
+    scope_owner_id: str
+    scope_owner_label: str
     added_to_follow_scope: bool
     fetch_enqueued: bool
     detail: str

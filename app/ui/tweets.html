@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OptMonster · 推文工作台</title>
-    <link rel="stylesheet" href="/ui/theme.css" />
+    <link rel="stylesheet" href="/ui/theme.css?v=20260316b" />
     <style>
       .layout-tweets {
         display: grid;
@@ -161,6 +161,7 @@
       <span class="topnav-brand">Opt<span>Monster</span></span>
       <div class="topnav-divider"></div>
       <a href="/console">账号总览</a>
+      <a href="/console/groups">账号分组</a>
       <a href="/console/tweets" class="active">推文工作台</a>
       <a href="/console/replies">回复处理</a>
       <a href="/console/ai">AI 设置</a>
@@ -192,7 +193,9 @@
         <select id="account-filter"><option value="">全部账号</option></select>
         <select id="source-filter">
           <option value="">全部来源</option>
-          <option value="timeline">timeline</option>
+          <option value="timeline">timeline_following</option>
+          <option value="timeline_popular">timeline_popular</option>
+          <option value="timeline_recommended">timeline_for_you</option>
           <option value="watch_user">watch_user</option>
           <option value="keyword_search">keyword_search</option>
         </select>
@@ -204,6 +207,7 @@
         </select>
         <div class="maintenance-actions">
           <button id="cleanup-btn" class="ghost" style="font-size:12px; padding:7px 12px;">清理过期推文</button>
+          <button id="clear-tweets-btn" class="ghost" style="font-size:12px; padding:7px 12px;">清除推文</button>
           <button id="backfill-ai-btn" class="ghost" style="font-size:12px; padding:7px 12px;">补跑未评分 AI</button>
         </div>
       </div>
@@ -239,6 +243,33 @@
       </div>
     </main>
 
+    <div class="modal-backdrop" id="clear-tweets-modal">
+      <div class="modal">
+        <div class="modal-header">
+          <div>
+            <div class="modal-title">清除推文</div>
+            <div class="modal-subtitle">会删除选中范围下的推文、关联动作和 AI 日志，不受是否过期限制。</div>
+          </div>
+          <button class="modal-close" data-close-modal="clear-tweets-modal">✕</button>
+        </div>
+        <div class="modal-body">
+          <form id="clear-tweets-form" class="form-grid">
+            <div class="field full">
+              <label for="clear-target-select">清除范围</label>
+              <select id="clear-target-select">
+                <option value="">全部账号</option>
+              </select>
+              <span class="field-help">选择“全部账号”会清空当前系统里所有推文记录。</span>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button id="confirm-clear-tweets-btn" type="submit" form="clear-tweets-form" class="danger">确认清除</button>
+          <button type="button" class="ghost" data-close-modal="clear-tweets-modal" style="margin-left:auto;">取消</button>
+        </div>
+      </div>
+    </div>
+
     <script>
       const state = {
         accounts: [],
@@ -253,6 +284,29 @@
       const accountFilter   = document.getElementById("account-filter");
       const sourceFilter    = document.getElementById("source-filter");
       const interactionFilter = document.getElementById("interaction-filter");
+      const clearTargetSelect = document.getElementById("clear-target-select");
+
+      function openModal(id) {
+        document.getElementById(id)?.classList.add("open");
+      }
+
+      function closeModal(id) {
+        document.getElementById(id)?.classList.remove("open");
+      }
+
+      document.querySelectorAll("[data-close-modal]").forEach(btn => {
+        btn.addEventListener("click", () => closeModal(btn.dataset.closeModal));
+      });
+      document.querySelectorAll(".modal-backdrop").forEach(backdrop => {
+        backdrop.addEventListener("click", event => {
+          if (event.target === backdrop) backdrop.classList.remove("open");
+        });
+      });
+      document.addEventListener("keydown", event => {
+        if (event.key === "Escape") {
+          document.querySelectorAll(".modal-backdrop.open").forEach(modal => modal.classList.remove("open"));
+        }
+      });
 
       function escapeHtml(v) {
         return String(v ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;");
@@ -275,8 +329,33 @@
         return new Date(v).toLocaleString();
       }
 
+      function formatCompactNumber(v) {
+        if (v == null) return null;
+        const n = Number(v);
+        if (Math.abs(n) >= 1000000) return `${(n / 1000000).toFixed(n % 1000000 === 0 ? 0 : 1)}m`;
+        if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k`;
+        return String(n);
+      }
+
+      function engagementChips(tweet) {
+        const metrics = [
+          tweet.view_count != null ? `views: ${formatCompactNumber(tweet.view_count)}` : null,
+          tweet.like_count != null ? `likes: ${formatCompactNumber(tweet.like_count)}` : null,
+          tweet.retweet_count != null ? `rts: ${formatCompactNumber(tweet.retweet_count)}` : null,
+          tweet.reply_count != null ? `replies: ${formatCompactNumber(tweet.reply_count)}` : null,
+        ].filter(Boolean);
+        return metrics.map(metric => `<span class="chip">${escapeHtml(metric)}</span>`).join("");
+      }
+
       function sourceScopeLabel(tweet) {
-        return `${tweet.account_id} · ${tweet.source_type} · ${tweet.source_key}`;
+        const sourceTypeMap = {
+          timeline: "timeline_following",
+          timeline_popular: "timeline_popular",
+          timeline_recommended: "timeline_for_you",
+          watch_user: "watch_user",
+          keyword_search: "keyword_search",
+        };
+        return `${tweet.account_id} · ${sourceTypeMap[tweet.source_type] || tweet.source_type} · ${tweet.source_key}`;
       }
 
       function interactionMeta(v) {
@@ -340,6 +419,7 @@
             <div class="chip-row">
               <span class="chip ${inter.cls}">AI: ${escapeHtml(inter.label)}</span>
               ${score != null ? `<span class="chip">${escapeHtml(score)} / 10</span>` : ""}
+              ${engagementChips(tweet)}
               <span class="chip ${chipClass(replyState)}">reply: ${escapeHtml(replyState)}</span>
               <span class="chip ${chipClass(likeState)}">like: ${escapeHtml(likeState)}</span>
             </div>
@@ -368,6 +448,15 @@
           return `<option value="${escapeHtml(a.id)}">${escapeHtml(a.id)} · ${escapeHtml(status)}</option>`;
         }).join("");
         accountFilter.value = selected;
+      }
+
+      function renderClearTargetOptions() {
+        const preferred = accountFilter.value || clearTargetSelect.value || "";
+        clearTargetSelect.innerHTML = '<option value="">全部账号</option>' + state.accounts.map(account => {
+          const handle = account.twitter_handle || account.id;
+          return `<option value="${escapeHtml(account.id)}">${escapeHtml(handle)} · ${escapeHtml(account.id)}</option>`;
+        }).join("");
+        clearTargetSelect.value = preferred;
       }
 
       function actionCard(action) {
@@ -468,6 +557,7 @@
               <div class="chip-row">
                 <span class="chip ${inter.cls}">AI: ${escapeHtml(inter.label)}</span>
                 ${score != null ? `<span class="chip">score: ${escapeHtml(score)} / 10</span>` : ""}
+                ${engagementChips(tweet)}
                 <span class="chip">创建: ${escapeHtml(formatDate(tweet.created_at_twitter))}</span>
                 <span class="chip">抓取: ${escapeHtml(formatDate(tweet.fetched_at))}</span>
                 ${tweet.latest_decision ? `<span class="chip ${chipClass(tweet.latest_decision.status)}">${escapeHtml(tweet.latest_decision.status)}</span>` : ""}
@@ -499,6 +589,7 @@
         const accounts = await fetchJson("/admin/accounts");
         state.accounts = accounts.slice().sort((a, b) => a.id.localeCompare(b.id));
         renderAccountFilter();
+        renderClearTargetOptions();
       }
 
       async function loadTweets() {
@@ -558,10 +649,19 @@
           const followAccount = target.dataset.followAccount;
           if (followAccount && state.selectedTweetId) {
             setStatus(`正在把作者加入 ${followAccount} 的关注范围...`);
-            await fetchJson(`/admin/tweets/${state.selectedTweetId}/follow-targets/${encodeURIComponent(followAccount)}`, { method: "POST" });
+            const result = await fetchJson(
+              `/admin/tweets/${state.selectedTweetId}/follow-targets/${encodeURIComponent(followAccount)}`,
+              { method: "POST" }
+            );
             await loadTweets();
             await loadTweetDetail(state.selectedTweetId);
-            setStatus(`${followAccount} 已加入关注范围`, "ok");
+            const scopeLabel = result.scope_owner_type === "group"
+              ? `分组 ${result.scope_owner_label}`
+              : `${result.scope_owner_label}`;
+            const successText = result.added_to_follow_scope
+              ? `${result.author_handle} 已加入${scopeLabel}的关注范围`
+              : `${scopeLabel} 已覆盖该作者，无需重复添加`;
+            setStatus(successText, "ok");
             return;
           }
           if (!actionId) return;
@@ -603,7 +703,7 @@
       });
 
       document.getElementById("cleanup-btn").addEventListener("click", async () => {
-        setStatus("正在清理过期推文...");
+        setStatus("正在清理超出时间窗口的过期推文...");
         try {
           const r = await fetchJson("/admin/tweets/cleanup", {
             method: "POST",
@@ -614,8 +714,33 @@
             state.selectedTweetId = null;
             tweetDetail.innerHTML = '<div class="empty-state">当前筛选下没有选中的推文。</div>';
           }
-          setStatus(`清理完成：推文 ${r.deleted_tweets} 条，动作 ${r.deleted_actions} 条，AI 日志 ${r.deleted_ai_logs} 条`, "ok");
+          setStatus(`过期推文清理完成：推文 ${r.deleted_tweets} 条，动作 ${r.deleted_actions} 条，AI 日志 ${r.deleted_ai_logs} 条`, "ok");
         } catch (e) { setStatus(`清理失败: ${e.message}`, "bad"); }
+      });
+
+      document.getElementById("clear-tweets-btn").addEventListener("click", () => {
+        renderClearTargetOptions();
+        openModal("clear-tweets-modal");
+      });
+
+      document.getElementById("clear-tweets-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const targetAccountId = clearTargetSelect.value || null;
+        setStatus(targetAccountId ? `正在清除 ${targetAccountId} 的全部推文...` : "正在清除全部账号的推文...");
+        try {
+          const r = await fetchJson("/admin/tweets/clear", {
+            method: "POST",
+            body: JSON.stringify({ account_id: targetAccountId }),
+          });
+          closeModal("clear-tweets-modal");
+          await loadTweets();
+          if (state.selectedTweetId && !filteredTweets().some(t => t.id === state.selectedTweetId)) {
+            state.selectedTweetId = null;
+            tweetDetail.innerHTML = '<div class="empty-state">当前筛选下没有选中的推文。</div>';
+          }
+          const targetLabel = targetAccountId || "全部账号";
+          setStatus(`清除完成：${targetLabel} 的推文 ${r.deleted_tweets} 条，动作 ${r.deleted_actions} 条，AI 日志 ${r.deleted_ai_logs} 条`, "ok");
+        } catch (e) { setStatus(`清除失败: ${e.message}`, "bad"); }
       });
 
       document.getElementById("backfill-ai-btn").addEventListener("click", async () => {

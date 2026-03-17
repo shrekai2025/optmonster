@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OptMonster · 账号分组</title>
+    <link rel="stylesheet" href="/ui/theme.css?v=20260316b" />
+    <style>
+      .layout-groups {
+        display: grid;
+        grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+        gap: 20px;
+        align-items: start;
+      }
+
+      .group-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .group-card {
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-elevated);
+        cursor: pointer;
+        transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+      }
+
+      .group-card:hover {
+        border-color: var(--border-strong);
+        transform: translateY(-1px);
+      }
+
+      .group-card.active {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(108, 140, 255, 0.12);
+      }
+
+      .group-note {
+        margin-top: 14px;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-elevated);
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .member-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .member-pill {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-elevated);
+      }
+
+      @media (max-width: 1020px) {
+        .layout-groups {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="topnav">
+      <span class="topnav-brand">Opt<span>Monster</span></span>
+      <div class="topnav-divider"></div>
+      <a href="/console">账号总览</a>
+      <a href="/console/groups" class="active">账号分组</a>
+      <a href="/console/tweets">推文工作台</a>
+      <a href="/console/replies">回复处理</a>
+      <a href="/console/ai">AI 设置</a>
+      <a href="/console/ai/logs">AI 日志</a>
+      <div class="topnav-actions">
+        <button id="create-group-btn" class="secondary">新建分组</button>
+        <button id="refresh-btn">刷新</button>
+      </div>
+    </nav>
+
+    <main class="shell">
+      <div class="page-header">
+        <div class="page-header-inner">
+          <div class="page-title-group">
+            <p class="page-eyebrow">Account Groups</p>
+            <h1 class="page-title">账号分组</h1>
+            <p class="page-subtitle">同组账号共享相同的任务目标与抓取范围，其他运行参数仍按账号独立。</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="status-bar" class="status-bar">
+        <div class="status-dot"></div>
+        <span id="status-text">正在初始化...</span>
+      </div>
+
+      <div class="layout-groups" style="margin-top:20px;">
+        <div class="stack">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title-group">
+                <p class="card-eyebrow">Groups</p>
+                <p class="card-title">分组列表</p>
+                <p class="card-subtitle">点击左侧组名编辑共享配置</p>
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="groups-list" class="group-list"></div>
+              <div class="group-note">
+                分组会统一接管组内账号的 <strong>targets</strong> 和 <strong>persona</strong>。
+                <br />
+                账号自己的抓取频率、预算、cookie、execution mode 保持独立。
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="stack">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title-group">
+                <p class="card-eyebrow">Shared Config</p>
+                <p class="card-title">共享任务配置</p>
+                <p class="card-subtitle">保存后组内账号下一轮抓取和 AI 行为会按新组配置生效</p>
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="group-editor"></div>
+              <div style="display:flex; gap:10px; margin-top:18px; flex-wrap:wrap;">
+                <button id="save-btn">保存分组</button>
+                <button id="delete-btn" type="button" class="danger">删除分组</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title-group">
+                <p class="card-eyebrow">Members</p>
+                <p class="card-title">成员账号</p>
+                <p class="card-subtitle">成员归属在账号详情页里切换</p>
+              </div>
+            </div>
+            <div class="card-body">
+              <div id="member-list" class="member-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      const state = {
+        groups: [],
+        currentGroupId: null,
+        currentDoc: null,
+        isCreating: false,
+      };
+
+      const statusBar = document.getElementById("status-bar");
+      const statusText = document.getElementById("status-text");
+      const groupsList = document.getElementById("groups-list");
+      const groupEditor = document.getElementById("group-editor");
+      const memberList = document.getElementById("member-list");
+
+      function setStatus(message, level = "") {
+        statusText.textContent = message;
+        statusBar.className = "status-bar" + (level ? " " + level : "");
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      async function fetchJson(url, options = {}) {
+        const response = await fetch(url, { headers: { "Content-Type": "application/json" }, ...options });
+        if (!response.ok) {
+          let detail = response.statusText;
+          try { const body = await response.json(); detail = body.detail || JSON.stringify(body); } catch {}
+          throw new Error(detail);
+        }
+        return response.status === 204 ? null : response.json();
+      }
+
+      function parseLinePairs(value, keyName) {
+        return value
+          .split("\n")
+          .map(line => line.trim())
+          .filter(Boolean)
+          .map(line => {
+            const [rawKey, rawCount] = line.split(",");
+            return {
+              [keyName]: (rawKey || "").trim(),
+              count: Number((rawCount || "").trim() || "20"),
+            };
+          })
+          .filter(item => item[keyName]);
+      }
+
+      function blankGroup() {
+        return {
+          group: {
+            id: "",
+            name: "",
+            targets: {
+              timeline: true,
+              timeline_popular: false,
+              timeline_recommended: false,
+              follow_users_enabled: true,
+              search_keywords_enabled: true,
+              follow_users: [],
+              search_keywords: [],
+            },
+            persona: {
+              name: "Operator",
+              role: "Thoughtful X account operator",
+              tone: "Clear, concise, and warm",
+              language: "English",
+              forbidden_topics: [],
+              reply_style: "Offer one concrete thought or question in under 40 words.",
+            },
+          },
+          source_file: "新建分组，保存后生成 YAML",
+          config_revision: "pending",
+          member_account_ids: [],
+        };
+      }
+
+      function renderGroupsList() {
+        if (!state.groups.length) {
+          groupsList.innerHTML = '<div class="empty-state">还没有分组。点击右上角“新建分组”。</div>';
+          return;
+        }
+        groupsList.innerHTML = state.groups.map(group => {
+          const active = !state.isCreating && state.currentGroupId === group.id ? "active" : "";
+          return `
+            <button class="group-card ${active}" data-group-id="${escapeHtml(group.id)}" type="button">
+              <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start;">
+                <div>
+                  <div style="font-size:14px; font-weight:600; color:var(--text);">${escapeHtml(group.name)}</div>
+                  <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">${escapeHtml(group.id)}</div>
+                </div>
+                <span class="chip">${escapeHtml(group.member_count)}</span>
+              </div>
+            </button>
+          `;
+        }).join("");
+      }
+
+      function renderMemberList(doc) {
+        const members = doc.member_account_ids || [];
+        if (!members.length) {
+          memberList.innerHTML = '<div class="empty-state">这个分组还没有成员账号。</div>';
+          return;
+        }
+        memberList.innerHTML = members.map(accountId => `
+          <div class="member-pill">
+            <span>${escapeHtml(accountId)}</span>
+            <a href="/console/accounts/${encodeURIComponent(accountId)}">进入账号 →</a>
+          </div>
+        `).join("");
+      }
+
+      function renderEditor() {
+        const doc = state.currentDoc || blankGroup();
+        const group = doc.group;
+        const readOnlyId = state.isCreating ? "" : "readonly";
+        groupEditor.innerHTML = `
+          <div class="form-grid">
+            <div class="field">
+              <label for="field-group-id">group.id</label>
+              <input id="field-group-id" value="${escapeHtml(group.id)}" ${readOnlyId} />
+              <span class="field-help">分组唯一标识。创建后不支持改 id。</span>
+            </div>
+            <div class="field">
+              <label for="field-group-name">group.name</label>
+              <input id="field-group-name" value="${escapeHtml(group.name)}" />
+              <span class="field-help">给管理页看的分组名称。</span>
+            </div>
+            <div class="field full">
+              <label for="field-persona-name">persona.name</label>
+              <input id="field-persona-name" value="${escapeHtml(group.persona.name)}" />
+              <span class="field-help">组内账号共享的 persona name。</span>
+            </div>
+            <div class="field">
+              <label for="field-persona-language">persona.language</label>
+              <input id="field-persona-language" value="${escapeHtml(group.persona.language)}" />
+            </div>
+            <div class="field full">
+              <label for="field-persona-role">persona.role</label>
+              <textarea id="field-persona-role">${escapeHtml(group.persona.role)}</textarea>
+              <span class="field-help">这里可作为组统一任务目标描述。</span>
+            </div>
+            <div class="field full">
+              <label for="field-persona-tone">persona.tone</label>
+              <textarea id="field-persona-tone">${escapeHtml(group.persona.tone)}</textarea>
+            </div>
+            <div class="field full">
+              <label for="field-persona-style">persona.reply_style</label>
+              <textarea id="field-persona-style">${escapeHtml(group.persona.reply_style)}</textarea>
+            </div>
+            <div class="field full">
+              <label for="field-forbidden">persona.forbidden_topics (每行一个)</label>
+              <textarea id="field-forbidden">${escapeHtml((group.persona.forbidden_topics || []).join("\n"))}</textarea>
+            </div>
+
+            <div class="field full">
+              <label class="inline" for="field-timeline">
+                <input id="field-timeline" type="checkbox" ${group.targets.timeline ? "checked" : ""} />
+                <span class="inline-label-text">targets.timeline (Following)</span>
+              </label>
+            </div>
+            <div class="field full">
+              <label class="inline" for="field-timeline-popular">
+                <input id="field-timeline-popular" type="checkbox" ${group.targets.timeline_popular ? "checked" : ""} />
+                <span class="inline-label-text">targets.timeline_popular (Hot / Viral)</span>
+              </label>
+            </div>
+            <div class="field full">
+              <label class="inline" for="field-timeline-recommended">
+                <input id="field-timeline-recommended" type="checkbox" ${group.targets.timeline_recommended ? "checked" : ""} />
+                <span class="inline-label-text">targets.timeline_recommended (For You)</span>
+              </label>
+            </div>
+            <div class="field full">
+              <label class="inline" for="field-follow-users-enabled">
+                <input id="field-follow-users-enabled" type="checkbox" ${group.targets.follow_users_enabled !== false ? "checked" : ""} />
+                <span class="inline-label-text">targets.follow_users_enabled</span>
+              </label>
+            </div>
+            <div class="field full">
+              <label class="inline" for="field-search-keywords-enabled">
+                <input id="field-search-keywords-enabled" type="checkbox" ${group.targets.search_keywords_enabled !== false ? "checked" : ""} />
+                <span class="inline-label-text">targets.search_keywords_enabled</span>
+              </label>
+            </div>
+            <div class="field full">
+              <label for="field-follow-users">targets.follow_users (每行 @handle,count)</label>
+              <textarea id="field-follow-users">${escapeHtml((group.targets.follow_users || []).map(item => `${item.handle},${item.count}`).join("\n"))}</textarea>
+            </div>
+            <div class="field full">
+              <label for="field-keywords">targets.search_keywords (每行 query,count)</label>
+              <textarea id="field-keywords">${escapeHtml((group.targets.search_keywords || []).map(item => `${item.query},${item.count}`).join("\n"))}</textarea>
+            </div>
+          </div>
+        `;
+
+        renderMemberList(doc);
+        document.getElementById("delete-btn").disabled = state.isCreating;
+      }
+
+      function buildPayload() {
+        return {
+          id: document.getElementById("field-group-id").value.trim(),
+          name: document.getElementById("field-group-name").value.trim(),
+          targets: {
+            timeline: document.getElementById("field-timeline").checked,
+            timeline_popular: document.getElementById("field-timeline-popular").checked,
+            timeline_recommended: document.getElementById("field-timeline-recommended").checked,
+            follow_users_enabled: document.getElementById("field-follow-users-enabled").checked,
+            follow_users: parseLinePairs(document.getElementById("field-follow-users").value, "handle"),
+            search_keywords_enabled: document.getElementById("field-search-keywords-enabled").checked,
+            search_keywords: parseLinePairs(document.getElementById("field-keywords").value, "query"),
+          },
+          persona: {
+            name: document.getElementById("field-persona-name").value.trim(),
+            role: document.getElementById("field-persona-role").value.trim(),
+            tone: document.getElementById("field-persona-tone").value.trim(),
+            language: document.getElementById("field-persona-language").value.trim(),
+            forbidden_topics: document.getElementById("field-forbidden").value
+              .split("\n")
+              .map(item => item.trim())
+              .filter(Boolean),
+            reply_style: document.getElementById("field-persona-style").value.trim(),
+          },
+        };
+      }
+
+      async function loadGroups() {
+        state.groups = await fetchJson("/admin/groups");
+        renderGroupsList();
+      }
+
+      async function selectGroup(groupId) {
+        state.currentGroupId = groupId;
+        state.isCreating = false;
+        state.currentDoc = await fetchJson(`/admin/groups/${encodeURIComponent(groupId)}`);
+        renderGroupsList();
+        renderEditor();
+      }
+
+      function startCreatingGroup() {
+        state.isCreating = true;
+        state.currentGroupId = null;
+        state.currentDoc = blankGroup();
+        renderGroupsList();
+        renderEditor();
+      }
+
+      async function initializePage() {
+        await loadGroups();
+        if (state.groups.length) {
+          await selectGroup(state.groups[0].id);
+          setStatus("分组数据已加载", "ok");
+          return;
+        }
+        startCreatingGroup();
+        setStatus("当前还没有分组，先创建一个。");
+      }
+
+      groupsList.addEventListener("click", async (event) => {
+        const btn = event.target.closest("[data-group-id]");
+        if (!btn) return;
+        try {
+          setStatus(`正在加载分组 ${btn.dataset.groupId}...`);
+          await selectGroup(btn.dataset.groupId);
+          setStatus(`分组 ${btn.dataset.groupId} 已加载`, "ok");
+        } catch (error) {
+          setStatus(`加载失败: ${error.message}`, "bad");
+        }
+      });
+
+      document.getElementById("create-group-btn").addEventListener("click", () => {
+        startCreatingGroup();
+        setStatus("正在创建新分组...");
+      });
+
+      document.getElementById("refresh-btn").addEventListener("click", async () => {
+        try {
+          setStatus("正在刷新分组数据...");
+          await initializePage();
+        } catch (error) {
+          setStatus(`刷新失败: ${error.message}`, "bad");
+        }
+      });
+
+      document.getElementById("save-btn").addEventListener("click", async () => {
+        const payload = buildPayload();
+        try {
+          setStatus(state.isCreating ? "正在创建分组..." : "正在保存分组...");
+          const result = await fetchJson(
+            state.isCreating
+              ? "/admin/groups"
+              : `/admin/groups/${encodeURIComponent(state.currentGroupId)}`,
+            {
+              method: state.isCreating ? "POST" : "PUT",
+              body: JSON.stringify(payload),
+            }
+          );
+          await loadGroups();
+          await selectGroup(result.group.group.id);
+          setStatus(`分组 ${result.group.group.id} 已保存`, "ok");
+        } catch (error) {
+          setStatus(`保存失败: ${error.message}`, "bad");
+        }
+      });
+
+      document.getElementById("delete-btn").addEventListener("click", async () => {
+        if (state.isCreating || !state.currentGroupId) return;
+        const confirmed = window.confirm(`确认删除分组 ${state.currentGroupId} 吗？`);
+        if (!confirmed) return;
+        try {
+          setStatus(`正在删除分组 ${state.currentGroupId}...`);
+          await fetchJson(`/admin/groups/${encodeURIComponent(state.currentGroupId)}`, {
+            method: "DELETE",
+          });
+          await initializePage();
+          setStatus(`分组 ${state.currentGroupId} 已删除`, "ok");
+        } catch (error) {
+          setStatus(`删除失败: ${error.message}`, "bad");
+        }
+      });
+
+      initializePage().catch(error => {
+        setStatus(`加载失败: ${error.message}`, "bad");
+        groupsList.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(error.message)}</div>`;
+        groupEditor.innerHTML = "";
+        memberList.innerHTML = "";
+      });
+    </script>
+  </body>
+</html>

@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./optmonster.db"
     redis_url: str = "redis://localhost:6379/0"
     config_dir: Path = Field(default=Path("config/accounts"))
+    group_config_dir: Path = Field(default=Path("config/groups"))
     cookie_dir: Path = Field(default=Path("config/cookies"))
     cookie_import_dir: Path = Field(default=Path("."))
     worker_poll_interval_seconds: int = 30
@@ -35,6 +36,10 @@ class Settings(BaseSettings):
     fetch_latest_first: bool = True
     fetch_include_replies: bool = True
     fetch_include_retweets: bool = True
+    popular_tweet_min_views: int = 100000
+    popular_tweet_min_likes: int = 500
+    popular_tweet_min_retweets: int = 50
+    popular_tweet_min_replies: int = 20
     lock_ttl_seconds: int = 300
     pause_after_failures: int = 3
     backoff_base_seconds: int = 30
@@ -112,6 +117,14 @@ def get_settings() -> Settings:
             "yes",
             "on",
         }
+    if "POPULAR_TWEET_MIN_VIEWS" in overrides:
+        settings.popular_tweet_min_views = int(overrides["POPULAR_TWEET_MIN_VIEWS"])
+    if "POPULAR_TWEET_MIN_LIKES" in overrides:
+        settings.popular_tweet_min_likes = int(overrides["POPULAR_TWEET_MIN_LIKES"])
+    if "POPULAR_TWEET_MIN_RETWEETS" in overrides:
+        settings.popular_tweet_min_retweets = int(overrides["POPULAR_TWEET_MIN_RETWEETS"])
+    if "POPULAR_TWEET_MIN_REPLIES" in overrides:
+        settings.popular_tweet_min_replies = int(overrides["POPULAR_TWEET_MIN_REPLIES"])
     settings.llm_base_url = overrides.get("LLM_BASE_URL", settings.llm_base_url)
     settings.llm_api_key = overrides.get("LLM_API_KEY", settings.llm_api_key)
     settings.llm_model_id = overrides.get("LLM_MODEL_ID", settings.llm_model_id)
@@ -135,6 +148,10 @@ def _load_runtime_overrides(path: Path) -> dict[str, str]:
             "FETCH_LATEST_FIRST",
             "FETCH_INCLUDE_REPLIES",
             "FETCH_INCLUDE_RETWEETS",
+            "POPULAR_TWEET_MIN_VIEWS",
+            "POPULAR_TWEET_MIN_LIKES",
+            "POPULAR_TWEET_MIN_RETWEETS",
+            "POPULAR_TWEET_MIN_REPLIES",
             "LLM_PROVIDER",
             "LLM_BASE_URL",
             "LLM_API_KEY",

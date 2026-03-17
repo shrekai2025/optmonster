@@ -21,6 +21,13 @@ from app.accounts.schemas import (
     AccountConfig,
     AccountConfigDocumentView,
     AccountConfigEditView,
+    AccountGroupConfig,
+    AccountGroupDeleteResponse,
+    AccountGroupDocumentView,
+    AccountGroupEditView,
+    AccountGroupListItem,
+    AccountGroupUpdateResult,
+    AccountExecutionModeUpdateResult,
     AccountConfigUpdateResult,
     AccountDashboardItem,
     AccountDeleteResponse,
@@ -31,6 +38,7 @@ from app.accounts.schemas import (
     CookieImportResult,
     DashboardSummary,
     DashboardView,
+    FetchQueueItemView,
     FollowerSnapshotPoint,
     OperationLogView,
     ReloadSummary,
@@ -40,6 +48,7 @@ from app.accounts.schemas import (
     TweetActionSummary,
     TweetAuthorCoverageItem,
     TweetCleanupResult,
+    TweetClearResult,
     TweetDecisionSummary,
     TweetDetailView,
     TweetInteractionState,
@@ -164,6 +173,7 @@ class AccountService:
 
     async def list_accounts(self, *, fetch_limit_default: int) -> list[AccountAdminView]:
         accounts = await self.registry.list_accounts()
+        groups = {group.id: group for group in await self.registry.list_groups()}
         async with self.session_factory() as session:
             states = {
                 state.account_id: state
@@ -181,6 +191,8 @@ class AccountService:
                     twitter_handle=account.twitter_handle,
                     enabled=account.enabled,
                     execution_mode=account.execution_mode,
+                    group_id=account.group_id,
+                    group_name=groups.get(account.group_id).name if account.group_id in groups else None,
                     source_file=str(account.source_file),
                     config_revision=account.config_revision or "",
                     cookie_file=str(account.resolved_cookie_file),
@@ -206,6 +218,7 @@ class AccountService:
         account = await self.registry.get(account_id)
         if account is None:
             raise KeyError(account_id)
+        group = await self.registry.get_group(account.group_id) if account.group_id else None
         async with self.session_factory() as session:
             state = await session.get(AccountRuntimeState, account.id)
             if state is None:
@@ -218,7 +231,88 @@ class AccountService:
                     .limit(30)
                 )
             ).scalars().all()
-        return self._to_config_document(account, state, operations)
+        return self._to_config_document(account, state, operations, group=group)
+
+    async def list_groups(self) -> list[AccountGroupListItem]:
+        groups = await self.registry.list_groups()
+        accounts = await self.registry.list_accounts()
+        member_map = self._group_member_map(accounts)
+        return [
+            AccountGroupListItem(
+                id=group.id,
+                name=group.name,
+                source_file=str(group.source_file),
+                config_revision=group.config_revision or "",
+                member_account_ids=member_map.get(group.id, []),
+                member_count=len(member_map.get(group.id, [])),
+            )
+            for group in groups
+        ]
+
+    async def get_group_config(self, group_id: str) -> AccountGroupDocumentView:
+        group = await self.registry.get_group(group_id)
+        if group is None:
+            raise KeyError(group_id)
+        member_account_ids = self._group_member_map(await self.registry.list_accounts()).get(group_id, [])
+        return self._to_group_document(group, member_account_ids=member_account_ids)
+
+    async def create_group_config(
+        self,
+        payload: AccountGroupEditView,
+    ) -> AccountGroupUpdateResult:
+        existing = await self.registry.get_group(payload.id)
+        if existing is not None:
+            raise ValueError(f"group already exists: {payload.id}")
+
+        candidate = AccountGroupConfig.model_validate(payload.model_dump(mode="json"))
+        group_dir = self.settings.resolve_path(self.settings.group_config_dir)
+        group_dir.mkdir(parents=True, exist_ok=True)
+        source_file = group_dir / f"{candidate.id}.yaml"
+        serialized = self._serialize_group_config(candidate)
+        self._write_yaml_atomic(source_file, serialized)
+
+        summary = await self.reload_configs()
+        updated = await self.get_group_config(candidate.id)
+        return AccountGroupUpdateResult(group=updated, reload_summary=summary)
+
+    async def update_group_config(
+        self,
+        group_id: str,
+        payload: AccountGroupEditView,
+    ) -> AccountGroupUpdateResult:
+        current = await self.registry.get_group(group_id)
+        if current is None or current.source_file is None:
+            raise KeyError(group_id)
+        if payload.id != group_id:
+            raise ValueError("group id cannot be changed")
+
+        candidate = AccountGroupConfig.model_validate(payload.model_dump(mode="json"))
+        source_file = current.source_file.resolve()
+        serialized = self._serialize_group_config(candidate)
+        self._write_yaml_atomic(source_file, serialized)
+
+        summary = await self.reload_configs()
+        updated = await self.get_group_config(group_id)
+        return AccountGroupUpdateResult(group=updated, reload_summary=summary)
+
+    async def delete_group_config(self, group_id: str) -> AccountGroupDeleteResponse:
+        current = await self.registry.get_group(group_id)
+        if current is None or current.source_file is None:
+            raise KeyError(group_id)
+
+        member_account_ids = self._group_member_map(await self.registry.list_accounts()).get(group_id, [])
+        if member_account_ids:
+            raise ValueError(
+                f"group is still assigned to accounts: {', '.join(member_account_ids)}"
+            )
+
+        deleted_config_file = self._unlink_if_exists(current.source_file.resolve())
+        summary = await self.reload_configs()
+        return AccountGroupDeleteResponse(
+            group_id=group_id,
+            deleted_config_file=deleted_config_file,
+            reload_summary=summary,
+        )
 
     async def list_cookie_import_candidates(self) -> list[CookieImportCandidateView]:
         import_dir = self.settings.resolve_path(self.settings.cookie_import_dir)
@@ -231,6 +325,8 @@ class AccountService:
     ) -> RuntimeSettingsUpdateResult:
         env_file = self.settings.resolve_path(self.settings.app_env_file)
         env_values = self._read_env_file(env_file)
+        normalized_api_key = payload.llm_api_key.strip() if payload.llm_api_key else None
+        should_replace_api_key = payload.replace_api_key or normalized_api_key is not None
         env_values["AI_ENABLED"] = "true" if payload.ai_enabled else "false"
         env_values["FETCH_RECENT_WINDOW_HOURS"] = str(payload.fetch_recent_window_hours)
         env_values["FETCH_LATEST_FIRST"] = "true" if payload.fetch_latest_first else "false"
@@ -240,11 +336,15 @@ class AccountService:
         env_values["FETCH_INCLUDE_RETWEETS"] = (
             "true" if payload.fetch_include_retweets else "false"
         )
+        env_values["POPULAR_TWEET_MIN_VIEWS"] = str(payload.popular_tweet_min_views)
+        env_values["POPULAR_TWEET_MIN_LIKES"] = str(payload.popular_tweet_min_likes)
+        env_values["POPULAR_TWEET_MIN_RETWEETS"] = str(payload.popular_tweet_min_retweets)
+        env_values["POPULAR_TWEET_MIN_REPLIES"] = str(payload.popular_tweet_min_replies)
         env_values["LLM_PROVIDER"] = payload.llm_provider.value
         env_values["LLM_BASE_URL"] = payload.llm_base_url or ""
         env_values["LLM_MODEL_ID"] = payload.llm_model_id or ""
-        if payload.replace_api_key:
-            env_values["LLM_API_KEY"] = payload.llm_api_key or ""
+        if should_replace_api_key:
+            env_values["LLM_API_KEY"] = normalized_api_key or ""
 
         self._write_env_file(env_file, env_values)
 
@@ -253,11 +353,15 @@ class AccountService:
         self.settings.fetch_latest_first = payload.fetch_latest_first
         self.settings.fetch_include_replies = payload.fetch_include_replies
         self.settings.fetch_include_retweets = payload.fetch_include_retweets
+        self.settings.popular_tweet_min_views = payload.popular_tweet_min_views
+        self.settings.popular_tweet_min_likes = payload.popular_tweet_min_likes
+        self.settings.popular_tweet_min_retweets = payload.popular_tweet_min_retweets
+        self.settings.popular_tweet_min_replies = payload.popular_tweet_min_replies
         self.settings.llm_provider = payload.llm_provider
         self.settings.llm_base_url = payload.llm_base_url or None
         self.settings.llm_model_id = payload.llm_model_id or None
-        if payload.replace_api_key:
-            self.settings.llm_api_key = payload.llm_api_key or None
+        if should_replace_api_key:
+            self.settings.llm_api_key = normalized_api_key or None
 
         return RuntimeSettingsUpdateResult(
             runtime_settings=self._runtime_settings_view(),
@@ -415,6 +519,7 @@ class AccountService:
                 "enabled": payload.enabled,
                 "execution_mode": payload.execution_mode,
                 "cookie_file": payload.cookie_file,
+                "group_id": payload.group_id,
                 "proxy": payload.proxy.model_dump(mode="json") if payload.proxy else None,
                 "targets": payload.targets.model_dump(mode="json"),
                 "fetch_schedule": payload.fetch_schedule.model_dump(mode="json"),
@@ -423,6 +528,8 @@ class AccountService:
                 "writing_guide_file": payload.writing_guide_file,
             }
         )
+        if candidate.group_id and await self.registry.get_group(candidate.group_id) is None:
+            raise ValueError(f"group not found: {candidate.group_id}")
         resolved_cookie = self.registry.loader.resolve_cookie_path(candidate.cookie_file)
         if not resolved_cookie.exists():
             raise ValueError(f"cookie file does not exist: {resolved_cookie}")
@@ -435,6 +542,29 @@ class AccountService:
         updated_id = candidate.id
         updated = await self.get_account_config(updated_id)
         return AccountConfigUpdateResult(account=updated, reload_summary=summary)
+
+    async def update_account_execution_mode(
+        self,
+        account_id: str,
+        execution_mode: ExecutionMode,
+    ) -> AccountExecutionModeUpdateResult:
+        current = await self.registry.get(account_id)
+        if current is None or current.source_file is None:
+            raise KeyError(account_id)
+        if execution_mode == ExecutionMode.DRY_RUN:
+            raise ValueError("dry_run is not supported in quick switch")
+
+        source_file = current.source_file.resolve()
+        candidate = current.model_copy(update={"execution_mode": execution_mode})
+        serialized = self._serialize_config(candidate)
+        self._write_yaml_atomic(source_file, serialized)
+
+        summary = await self.reload_configs()
+        return AccountExecutionModeUpdateResult(
+            account_id=account_id,
+            execution_mode=execution_mode,
+            reload_summary=summary,
+        )
 
     async def disable_account(self, account_id: str) -> AccountStateChangeResponse:
         account = await self.registry.get(account_id)
@@ -522,6 +652,16 @@ class AccountService:
                     )
                 )
             ).scalars().all()
+            latest_action_rows = (
+                await session.execute(
+                    select(ActionRequest.account_id, func.max(ActionRequest.executed_at))
+                    .where(
+                        ActionRequest.status == ActionStatus.SUCCEEDED,
+                        ActionRequest.executed_at.is_not(None),
+                    )
+                    .group_by(ActionRequest.account_id)
+                )
+            ).all()
             operations = (
                 await session.execute(
                     select(OperationLog)
@@ -533,19 +673,27 @@ class AccountService:
         dashboard_accounts: list[AccountDashboardItem] = []
         usable_accounts = 0
         registry_accounts = {account.id: account for account in await self.registry.list_accounts()}
+        account_view_map = {account.id: account for account in account_views}
         follower_history_map: dict[str, list[AccountFollowerSnapshot]] = defaultdict(list)
         for snapshot in snapshot_rows:
             follower_history_map[snapshot.account_id].append(snapshot)
+        latest_action_map = {
+            account_id: executed_at for account_id, executed_at in latest_action_rows
+        }
+        queued_fetch_accounts = await self.coordinator.list_fetch_queue()
 
         for account_view in account_views:
             stats = tweet_stats.get(account_view.id, {})
             registry_account = registry_accounts[account_view.id]
             budgets = await self._build_budget_meters(registry_account, now)
             daily_reset_in_seconds = self.coordinator.seconds_until_daily_reset(now)
-            cooldown_until = await self.coordinator.get_action_cooldown_until(account_view.id)
-            next_action_in_seconds = 0
-            if cooldown_until and cooldown_until > now:
-                next_action_in_seconds = int((cooldown_until - now).total_seconds())
+            next_action_in_seconds = await self._next_action_in_seconds(
+                registry_account,
+                account_view.lifecycle_status,
+                budgets,
+                now,
+                latest_executed_at=latest_action_map.get(account_view.id),
+            )
             follower_history_rows = follower_history_map.get(account_view.id, [])[-14:]
             follower_count = None
             follower_delta = None
@@ -578,6 +726,8 @@ class AccountService:
                     twitter_handle=account_view.twitter_handle,
                     enabled=account_view.enabled,
                     execution_mode=account_view.execution_mode,
+                    group_id=account_view.group_id,
+                    group_name=account_view.group_name,
                     persona_name=registry_account.persona.name,
                     writing_guide_file=str(registry_account.writing_guide_file),
                     fetch_schedule=registry_account.fetch_schedule.model_copy(deep=True),
@@ -612,6 +762,19 @@ class AccountService:
             )
             for operation in operations
         ]
+        fetch_queue = [
+            FetchQueueItemView(
+                account_id=account_id,
+                twitter_handle=registry_accounts.get(account_id).twitter_handle
+                if registry_accounts.get(account_id)
+                else None,
+                lifecycle_status=account_view_map.get(account_id).lifecycle_status
+                if account_view_map.get(account_id)
+                else None,
+                position=index + 1,
+            )
+            for index, account_id in enumerate(queued_fetch_accounts)
+        ]
 
         enabled_accounts = sum(1 for account in account_views if account.enabled)
         paused_accounts = sum(
@@ -632,6 +795,7 @@ class AccountService:
             runtime_settings=self._runtime_settings_view(),
             accounts=dashboard_accounts,
             recent_operations=recent_operations,
+            fetch_queue=fetch_queue,
         )
 
     async def list_tweets(
@@ -671,6 +835,10 @@ class AccountService:
                 author_handle=tweet.author_handle,
                 text=tweet.text,
                 lang=tweet.lang,
+                view_count=tweet.view_count,
+                like_count=tweet.like_count,
+                retweet_count=tweet.retweet_count,
+                reply_count=tweet.reply_count,
                 created_at_twitter=tweet.created_at_twitter,
                 fetched_at=tweet.fetched_at,
                 tweet_url=f"https://x.com/i/status/{tweet.tweet_id}",
@@ -757,6 +925,46 @@ class AccountService:
             deleted_disabled_scope_tweets=reasons["disabled_scope"],
         )
 
+    async def clear_tweets(
+        self,
+        *,
+        account_id: str | None,
+    ) -> TweetClearResult:
+        if account_id is not None and await self.registry.get(account_id) is None:
+            raise KeyError(account_id)
+
+        query = select(FetchedTweet.id)
+        if account_id:
+            query = query.where(FetchedTweet.account_id == account_id)
+
+        async with self.session_factory() as session:
+            tweet_ids = list((await session.execute(query)).scalars().all())
+
+            deleted_actions = 0
+            deleted_ai_logs = 0
+            deleted_tweets = 0
+            if tweet_ids:
+                deleted_actions = await self._execute_delete(
+                    session,
+                    delete(ActionRequest).where(ActionRequest.fetched_tweet_id.in_(tweet_ids)),
+                )
+                deleted_ai_logs = await self._execute_delete(
+                    session,
+                    delete(AILogRecord).where(AILogRecord.fetched_tweet_id.in_(tweet_ids)),
+                )
+                deleted_tweets = await self._execute_delete(
+                    session,
+                    delete(FetchedTweet).where(FetchedTweet.id.in_(tweet_ids)),
+                )
+                await session.commit()
+
+        return TweetClearResult(
+            account_id=account_id,
+            deleted_tweets=deleted_tweets,
+            deleted_ai_logs=deleted_ai_logs,
+            deleted_actions=deleted_actions,
+        )
+
     async def get_tweet_detail(self, tweet_record_id: int) -> TweetDetailView:
         async with self.session_factory() as session:
             tweet = await session.get(FetchedTweet, tweet_record_id)
@@ -801,6 +1009,10 @@ class AccountService:
             author_handle=tweet.author_handle,
             text=pick_best_tweet_text(tweet.text, tweet.raw_payload),
             lang=tweet.lang,
+            view_count=tweet.view_count,
+            like_count=tweet.like_count,
+            retweet_count=tweet.retweet_count,
+            reply_count=tweet.reply_count,
             created_at_twitter=tweet.created_at_twitter,
             fetched_at=tweet.fetched_at,
             tweet_url=f"https://x.com/i/status/{tweet.tweet_id}",
@@ -831,20 +1043,42 @@ class AccountService:
         if normalized_handle.lower() == current.twitter_handle.lower():
             raise ValueError("account cannot follow itself")
 
-        existing_handles = {item.handle.lower() for item in current.targets.follow_users}
-        if normalized_handle.lower() in existing_handles:
+        if current.group_id:
+            group = await self.registry.get_group(current.group_id)
+            if group is None:
+                raise ValueError(f"group not found: {current.group_id}")
+
+            updated_targets, changed = self._targets_payload_with_follow_target(
+                group.targets,
+                normalized_handle=normalized_handle,
+                default_count=default_count,
+            )
+            if not changed:
+                return await self.get_account_config(account_id), False
+
+            payload = AccountGroupEditView.model_validate(
+                {
+                    "id": group.id,
+                    "name": group.name,
+                    "targets": updated_targets,
+                    "persona": group.persona.model_dump(mode="json"),
+                }
+            )
+            await self.update_group_config(group.id, payload)
+            return await self.get_account_config(account_id), True
+
+        updated_targets, changed = self._targets_payload_with_follow_target(
+            current.targets,
+            normalized_handle=normalized_handle,
+            default_count=default_count,
+        )
+        if not changed:
             return await self.get_account_config(account_id), False
 
         payload = AccountConfigEditView.model_validate(
             {
                 **self._to_config_edit_view(current).model_dump(mode="json"),
-                "targets": {
-                    **current.targets.model_dump(mode="json"),
-                    "follow_users": [
-                        *current.targets.model_dump(mode="json").get("follow_users", []),
-                        {"handle": normalized_handle, "count": default_count},
-                    ],
-                },
+                "targets": updated_targets,
             }
         )
         updated = await self.update_account_config(account_id, payload)
@@ -875,6 +1109,61 @@ class AccountService:
                 )
             )
         return meters
+
+    async def _next_action_in_seconds(
+        self,
+        account: AccountConfig,
+        lifecycle_status: AccountLifecycleStatus,
+        budgets: list[BudgetMeterView],
+        now: datetime,
+        *,
+        latest_executed_at: datetime | None,
+    ) -> int:
+        if not account.enabled or lifecycle_status != AccountLifecycleStatus.ENABLED:
+            return 0
+        if account.execution_mode == ExecutionMode.READ_ONLY:
+            return 0
+
+        waits = [self._seconds_until_action_window(account, now)]
+        cooldown_until = await self.coordinator.get_action_cooldown_until(account.id)
+        if latest_executed_at is not None and latest_executed_at.tzinfo is None:
+            latest_executed_at = latest_executed_at.replace(tzinfo=UTC)
+        if cooldown_until is None and latest_executed_at is not None:
+            cooldown_until = latest_executed_at + timedelta(
+                minutes=account.behavior_budget.min_interval_minutes
+            )
+        if cooldown_until and cooldown_until > now:
+            waits.append(int((cooldown_until - now).total_seconds()))
+        if budgets and all(budget.remaining <= 0 for budget in budgets):
+            waits.append(self.coordinator.seconds_until_daily_reset(now))
+        return max(waits, default=0)
+
+    def _seconds_until_action_window(
+        self,
+        account: AccountConfig,
+        now: datetime,
+    ) -> int:
+        localized = now.astimezone(self.settings.timezone)
+        start_hour, end_hour = account.behavior_budget.active_hours
+        current_hour = localized.hour
+        if start_hour <= current_hour <= end_hour:
+            return 0
+
+        if current_hour < start_hour:
+            next_start = localized.replace(
+                hour=start_hour,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+        else:
+            next_start = (localized + timedelta(days=1)).replace(
+                hour=start_hour,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+        return max(int((next_start - localized).total_seconds()), 0)
 
     async def _build_author_coverage(
         self,
@@ -1043,9 +1332,19 @@ class AccountService:
             "persona": account.persona.model_dump(mode="json"),
             "writing_guide_file": str(account.writing_guide_file),
         }
+        if account.group_id:
+            payload["group_id"] = account.group_id
         if account.proxy is not None:
             payload["proxy"] = account.proxy.model_dump(mode="json")
         return payload
+
+    def _serialize_group_config(self, group: AccountGroupConfig) -> dict[str, Any]:
+        return {
+            "id": group.id,
+            "name": group.name,
+            "targets": group.targets.model_dump(mode="json"),
+            "persona": group.persona.model_dump(mode="json"),
+        }
 
     def _tweet_recent_cutoff(self, now: datetime) -> datetime | None:
         if self.settings.fetch_recent_window_hours <= 0:
@@ -1066,18 +1365,16 @@ class AccountService:
             created_at = self._normalize_timestamp(tweet.created_at_twitter or tweet.fetched_at)
             if created_at < cutoff:
                 return "outside_window"
-        if not self.settings.fetch_include_replies and self._stored_tweet_is_reply(tweet):
-            return "filtered_reply"
-        if not self.settings.fetch_include_retweets and self._stored_tweet_is_retweet(tweet):
-            return "filtered_retweet"
-        if not self._tweet_matches_account_scope(tweet, account):
-            return "disabled_scope"
         return None
 
     def _tweet_matches_account_scope(self, tweet: FetchedTweet, account: AccountConfig) -> bool:
         source_type = SourceType(tweet.source_type)
         if source_type == SourceType.TIMELINE:
             return account.targets.timeline
+        if source_type == SourceType.TIMELINE_POPULAR:
+            return account.targets.timeline_popular
+        if source_type == SourceType.TIMELINE_RECOMMENDED:
+            return account.targets.timeline_recommended
         if source_type == SourceType.WATCH_USER:
             return account.targets.follow_users_enabled and any(
                 item.handle.lower() == tweet.source_key.lower()
@@ -1146,6 +1443,10 @@ class AccountService:
             fetch_latest_first=self.settings.fetch_latest_first,
             fetch_include_replies=self.settings.fetch_include_replies,
             fetch_include_retweets=self.settings.fetch_include_retweets,
+            popular_tweet_min_views=self.settings.popular_tweet_min_views,
+            popular_tweet_min_likes=self.settings.popular_tweet_min_likes,
+            popular_tweet_min_retweets=self.settings.popular_tweet_min_retweets,
+            popular_tweet_min_replies=self.settings.popular_tweet_min_replies,
             llm_provider=self.settings.llm_provider,
             llm_base_url=self.settings.llm_base_url,
             llm_model_id=self.settings.llm_model_id,
@@ -1160,6 +1461,7 @@ class AccountService:
             enabled=account.enabled,
             execution_mode=account.execution_mode,
             cookie_file=str(account.cookie_file),
+            group_id=account.group_id,
             proxy=account.proxy,
             targets=account.targets.model_copy(deep=True),
             fetch_schedule=account.fetch_schedule.model_copy(deep=True),
@@ -1173,9 +1475,14 @@ class AccountService:
         account: AccountConfig,
         state: AccountRuntimeState,
         operations: list[OperationLog] | None = None,
+        *,
+        group: AccountGroupConfig | None = None,
     ) -> AccountConfigDocumentView:
         return AccountConfigDocumentView(
             account=self._to_config_edit_view(account),
+            group_name=group.name if group else None,
+            inherits_targets_from_group=group is not None,
+            inherits_persona_from_group=group is not None,
             source_file=str(account.source_file),
             config_revision=account.config_revision or "",
             lifecycle_status=AccountLifecycleStatus(state.lifecycle_status),
@@ -1201,6 +1508,31 @@ class AccountService:
             ],
         )
 
+    def _to_group_document(
+        self,
+        group: AccountGroupConfig,
+        *,
+        member_account_ids: list[str],
+    ) -> AccountGroupDocumentView:
+        return AccountGroupDocumentView(
+            group=AccountGroupEditView(
+                id=group.id,
+                name=group.name,
+                targets=group.targets.model_copy(deep=True),
+                persona=group.persona.model_copy(deep=True),
+            ),
+            source_file=str(group.source_file),
+            config_revision=group.config_revision or "",
+            member_account_ids=member_account_ids,
+        )
+
+    def _group_member_map(self, accounts: list[AccountConfig]) -> dict[str, list[str]]:
+        member_map: dict[str, list[str]] = defaultdict(list)
+        for account in accounts:
+            if account.group_id:
+                member_map[account.group_id].append(account.id)
+        return {group_id: sorted(member_ids) for group_id, member_ids in member_map.items()}
+
     def _to_tweet_action_summary(self, action: ActionRequest) -> TweetActionSummary:
         applied_execution_mode = None
         if action.applied_execution_mode:
@@ -1223,6 +1555,30 @@ class AccountService:
     def _normalize_handle(self, value: str) -> str:
         cleaned = value.strip()
         return cleaned if cleaned.startswith("@") else f"@{cleaned}"
+
+    def _targets_payload_with_follow_target(
+        self,
+        targets,
+        *,
+        normalized_handle: str,
+        default_count: int,
+    ) -> tuple[dict[str, Any], bool]:
+        payload = targets.model_dump(mode="json")
+        follow_users = list(payload.get("follow_users", []))
+        changed = False
+        existing_handles = {
+            str(item.get("handle", "")).lower()
+            for item in follow_users
+            if isinstance(item, dict) and item.get("handle")
+        }
+        if normalized_handle.lower() not in existing_handles:
+            follow_users.append({"handle": normalized_handle, "count": default_count})
+            payload["follow_users"] = follow_users
+            changed = True
+        if not payload.get("follow_users_enabled", True):
+            payload["follow_users_enabled"] = True
+            changed = True
+        return payload, changed
 
     def _parse_extra_yaml(self, value: str | None) -> dict[str, Any]:
         if not value or not value.strip():
