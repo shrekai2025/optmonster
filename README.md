@@ -10,37 +10,63 @@ Twitter 账号底座 v1/2，现阶段覆盖：
 
 ## Local Development
 
-1. 准备 Python 3.13+ 或直接使用 Docker。
-2. 复制环境文件：
+1. 准备 Python 3.13+ 或 Docker。
+2. 复制开发环境文件：
    - `cp config/environments/dev.env.example config/environments/dev.env`
-3. 安装依赖：
+3. 显式指定运行环境文件（必须）：
+   - `export APP_ENV_FILE=config/environments/dev.env`
+4. 安装依赖：
    - `python3 -m pip install -e '.[dev]'`
-4. 启动基础设施：
+5. 启动基础设施：
    - `docker compose --env-file config/environments/dev.env up postgres redis -d`
-5. 执行迁移并启动 API：
+6. 执行迁移并启动 API：
    - `alembic upgrade head`
    - `uvicorn app.main:app --reload`
-6. 启动 worker：
+7. 启动 worker（新终端，同样需要 `APP_ENV_FILE`）：
    - `python -m app.worker`
+8. 打开控制台：
+   - `http://127.0.0.1:8000/console`
 
 ## Docker Compose
 
 - 开发环境：
   - `docker compose --env-file config/environments/dev.env up --build`
 - 生产环境：
-  - `docker compose --env-file config/environments/prod.env.example --project-name optmonster-prod up --build`
+  - `cp config/environments/prod.env.example config/environments/prod.env`
+  - 编辑 `config/environments/prod.env`，至少替换：
+    - `POSTGRES_PASSWORD`
+    - `DATABASE_URL`
+    - `LLM_API_KEY`（如使用）
+    - `LLM_MODEL_ID`（如使用）
+  - `docker compose --env-file config/environments/prod.env --project-name optmonster-prod up --build -d`
 
-`docker compose` 现在会先运行一次 `migrate` 服务，再启动 `api` 和 `worker`，避免首次空库启动时的并发迁移冲突。
+`docker compose` 会先运行一次 `migrate` 服务，再启动 `api` 和 `worker`，避免首次空库启动时的并发迁移冲突。
 
 ## Config Layout
 
 - 账号配置：`config/accounts/*.yaml`
+- 账号分组：`config/groups/*.yaml`
 - Cookie 文件：`config/cookies/*.json`
 - 写作指南：`config/writing_guides/*.md`
 
 应用启动时会自动加载账号配置，并把运行态同步到数据库。
 
-### Global LLM Settings
+## 首次可用最短路径
+
+1. 把待导入的 cookie 文件（Netscape 或 JSON）放到项目根目录。
+2. 启动系统：
+   - `docker compose --env-file config/environments/dev.env up --build`
+3. 打开控制台：
+   - `http://127.0.0.1:8000/console`
+4. 在控制台导入 cookie 生成账号。
+5. 校验会话：
+   - `POST /admin/accounts/{account_id}/validate-session`
+6. 手动触发抓取：
+   - `POST /admin/accounts/{account_id}/fetch-now`
+7. 在推文工作台查看数据与后续动作：
+   - `http://127.0.0.1:8000/console/tweets`
+
+## Global LLM Settings
 
 环境文件支持第三方 LLM Provider 的全局配置：
 
@@ -65,40 +91,22 @@ Twitter 账号底座 v1/2，现阶段覆盖：
 
 ## Current Usage Flow
 
-当前推荐通过轻量控制台 + YAML 配置使用：
-
-1. 准备账号配置
-   - 编辑 `config/accounts/*.yaml`
-   - 把账号 Cookie JSON 放到 `config/cookies/*.json`
-2. 启动系统
-   - `docker compose --env-file config/environments/dev.env up --build`
-3. 打开控制台
-   - `http://127.0.0.1:8000/console`
-   - 推文工作台：`http://127.0.0.1:8000/console/tweets`
-4. 查看已加载账号
+1. 查看已加载账号：
    - `curl http://127.0.0.1:8000/admin/accounts`
-5. 手动校验某个账号 Cookie
+2. 手动校验某个账号 Cookie：
    - `curl -X POST http://127.0.0.1:8000/admin/accounts/<account_id>/validate-session`
-6. 手动触发一次抓取
+3. 手动触发一次抓取：
    - `curl -X POST http://127.0.0.1:8000/admin/accounts/<account_id>/fetch-now`
-7. 修改 YAML 后热重载
+4. 修改 YAML 后热重载：
    - `curl -X POST http://127.0.0.1:8000/admin/config/reload`
-8. 在推文工作台里生成 AI 决策
+5. 在推文工作台里生成 AI 决策：
    - `POST /admin/tweets/{tweet_record_id}/reply/generate`
-9. 审批或修改回复
+6. 审批或修改回复：
    - `POST /admin/actions/{action_id}/approve`
    - `POST /admin/actions/{action_id}/modify`
    - `POST /admin/actions/{action_id}/skip`
-10. 页面里直接编辑账号配置并保存
-   - `GET /admin/accounts/{account_id}/config`
-   - `PUT /admin/accounts/{account_id}/config`
-   - 可启用 `targets.timeline (Following)`、`targets.timeline_recommended (For You)`、`targets.timeline_popular (Hot / Viral)`
-11. 页面里从项目根目录导入 cookie 文件生成新账号
-   - 控制台会扫描根目录里的 Netscape / JSON cookie 文件
-   - 自动提取 `x.com / twitter.com` 登录 cookie，写入 `config/cookies/*.json`
-   - 自动生成 `config/accounts/*.yaml` 并立即 reload + validate session
 
-### API Endpoints
+## API Endpoints
 
 - `GET /healthz`：检查 API / DB / Redis 是否可用
 - `GET /admin/accounts`：查看账号配置和运行态
@@ -120,3 +128,17 @@ Twitter 账号底座 v1/2，现阶段覆盖：
 - `POST /admin/actions/{action_id}/approve`：批准动作
 - `POST /admin/actions/{action_id}/modify`：提交人工修改版并批准
 - `POST /admin/actions/{action_id}/skip`：跳过动作
+
+## 上传 GitHub 前检查清单
+
+1. 确认工作区状态：
+   - `git status`
+2. 确认敏感文件会被忽略：
+   - `git check-ignore -v .env config/environments/dev.env config/environments/prod.env`
+   - `git check-ignore -v config/cookies/*.json config/accounts/*.yaml optmonster.db`
+3. 确认未被跟踪：
+   - `git ls-files | rg "optmonster.db|config/cookies/|config/accounts/|config/environments/prod.env"`
+4. 提交前执行本地扫描：
+   - `python3 -m pip install pre-commit`
+   - `pre-commit install`
+   - `pre-commit run --all-files`

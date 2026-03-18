@@ -13,8 +13,13 @@ htmlcov/
 .DS_Store
 PLAN.md
 config/environments/dev.env
+config/environments/prod.env
 config/accounts/*.yaml
+config/groups/*.yaml
 config/writing_guides/*.md
 config/cookies/*.json
 !config/cookies/.gitkeep
+optmonster.db
+*.db-wal
+*.db-shm
 *.txt
