@@ -1,0 +1,10 @@
+title = "optmonster gitleaks config"
+
+[allowlist]
+description = "Allow known test fixtures and placeholders only."
+regexes = [
+  '''sk-secret-1234''',
+  '''sk-runtime-1234''',
+  '''replace-me''',
+  '''optmonster:optmonster''',
+]
